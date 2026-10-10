@@ -318,6 +318,10 @@ function selectStation(station, options = {}) {
 function renderSelectedStation(station) {
   const content = document.createElement('div');
   content.className = 'map-info';
+  content.addEventListener('click', (event) => {
+    event.stopPropagation();
+    kakao.maps.event.preventMap();
+  });
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
   closeButton.className = 'map-info-close';
@@ -325,7 +329,8 @@ function renderSelectedStation(station) {
   closeButton.textContent = '×';
   closeButton.addEventListener('click', (event) => {
     event.stopPropagation();
-    closeStationInfo();
+    kakao.maps.event.preventMap();
+    clearSelection();
   });
   content.append(
     closeButton,
@@ -355,6 +360,13 @@ function openStationInfo(station, marker) {
 
 function closeStationInfo() {
   state.infoOverlay.setMap(null);
+}
+
+function clearSelection() {
+  state.selectedStationId = '';
+  closeStationInfo();
+  syncSelectedMarker();
+  elements.riskRows.querySelectorAll('.selected').forEach((row) => row.classList.remove('selected'));
 }
 
 function renderRows() {
@@ -528,6 +540,7 @@ function getMarker(station) {
       clickable: true
     });
     kakao.maps.event.addListener(marker, 'click', () => {
+      kakao.maps.event.preventMap();
       const currentStation = state.allStations.find((item) => item.stationId === station.stationId) || station;
       selectStation(currentStation, { focusMap: false, openInfo: true, marker });
     });
@@ -609,32 +622,7 @@ function focusDistrict(district) {
 }
 
 function focusStation(station) {
-  if (!rowIsIncluded(station)) {
-    state.risk = 'all';
-    document.querySelector('[data-risk="all"]').classList.add('active');
-    document.querySelectorAll('[data-risk]:not([data-risk="all"])').forEach((button) => button.classList.remove('active'));
-    showToast('현재 필터에 포함되지 않아 위험 유형을 전체로 변경했습니다.');
-  }
-  if (state.district && state.district !== station.gu) {
-    state.district = station.gu;
-    elements.districtFilter.value = station.gu;
-  }
-  state.selectedStationId = station.stationId;
-  syncSelectedMarker();
-  const rows = sortedRows();
-  const index = rows.findIndex((item) => item.stationId === station.stationId);
-  state.page = index >= 0 ? Math.floor(index / config.pageSize) + 1 : 1;
-  renderDashboard();
-  document.getElementById('mapTitle').textContent = `${station.gu} · ${station.stationName}`;
-  state.map.setLevel(5);
-  state.map.panTo(new kakao.maps.LatLng(station.lat, station.lon));
-  requestAnimationFrame(() => {
-    document.querySelector(`[data-station-id="${CSS.escape(station.stationId)}"]`)?.scrollIntoView({ block: 'nearest' });
-  });
-}
-
-function rowIsIncluded(station) {
-  return stationMatchesRisk(station);
+  selectStation(station, { focusMap: true, openInfo: true });
 }
 
 function stationMatchesRisk(station) {
@@ -721,6 +709,7 @@ function chooseSuggestion(index) {
   if (!item) return;
   closeSuggestions();
   if (item.kind === 'district') {
+    clearSelection();
     state.district = item.gu;
     elements.districtFilter.value = item.gu;
     state.page = 1;
@@ -863,7 +852,7 @@ function setupMap() {
     zIndex: 10,
     clickable: true
   });
-  kakao.maps.event.addListener(state.map, 'click', closeStationInfo);
+  kakao.maps.event.addListener(state.map, 'click', clearSelection);
   kakao.maps.event.addListener(state.map, 'zoom_changed', renderMapLayers);
   kakao.maps.event.addListener(state.map, 'idle', refreshPointVisibility);
   window.addEventListener('resize', () => state.map.relayout());
@@ -875,6 +864,9 @@ function bindControls() {
   elements.districtFilter.addEventListener('change', () => {
     state.district = elements.districtFilter.value;
     state.page = 1;
+    if (state.selectedStationId && !filteredStations().some((station) => station.stationId === state.selectedStationId)) {
+      clearSelection();
+    }
     renderDashboard();
     if (state.district) focusDistrict(state.district);
   });
@@ -889,6 +881,9 @@ function bindControls() {
       state.risk = button.dataset.risk;
       state.page = 1;
       document.querySelectorAll('[data-risk]').forEach((item) => item.classList.toggle('active', item === button));
+      if (state.selectedStationId && !filteredStations().some((station) => station.stationId === state.selectedStationId)) {
+        clearSelection();
+      }
       renderDashboard();
     });
   });
