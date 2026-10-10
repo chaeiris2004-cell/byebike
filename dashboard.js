@@ -19,7 +19,7 @@ const state = {
   activeSuggestion: -1,
   map: null,
   clusterer: null,
-  infoWindow: null,
+  infoOverlay: null,
   markers: new Map(),
   districtOverlays: [],
   mapStage: '',
@@ -315,13 +315,24 @@ function selectStation(station, options = {}) {
 }
 
 function renderSelectedStation(station) {
-  state.infoWindowContent = document.createElement('div');
-  state.infoWindowContent.className = 'map-info';
-  state.infoWindowContent.append(
+  const content = document.createElement('div');
+  content.className = 'map-info';
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'map-info-close';
+  closeButton.setAttribute('aria-label', '닫기');
+  closeButton.textContent = '×';
+  closeButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    closeStationInfo();
+  });
+  content.append(
+    closeButton,
     textNode('strong', station.stationName),
     textNode('span', `${station.gu} · ${station.rackTotCnt} 거치대`),
     textNode('span', `현재 ${formatStock(station.stock.now)} · +1h ${formatStock(station.stock.h1)} · +3h ${formatStock(station.stock.h3)}`)
   );
+  return content;
 }
 
 function textNode(tag, text) {
@@ -335,9 +346,14 @@ function formatStock(value) {
 }
 
 function openStationInfo(station, marker) {
-  renderSelectedStation(station);
-  state.infoWindow.setContent(state.infoWindowContent);
-  state.infoWindow.open(state.map, marker);
+  state.infoOverlay.setMap(null);
+  state.infoOverlay.setContent(renderSelectedStation(station));
+  state.infoOverlay.setPosition(marker.getPosition());
+  state.infoOverlay.setMap(state.map);
+}
+
+function closeStationInfo() {
+  state.infoOverlay.setMap(null);
 }
 
 function renderRows() {
@@ -818,7 +834,15 @@ function setupMap() {
       fontFamily: 'DM Mono, monospace', fontSize: '11px', border: '2px solid #fff', boxShadow: '0 2px 8px #15221b4d'
     }]
   });
-  state.infoWindow = new kakao.maps.InfoWindow({ removable: true, zIndex: 10 });
+  state.infoOverlay = new kakao.maps.CustomOverlay({
+    position: state.map.getCenter(),
+    content: document.createElement('div'),
+    xAnchor: 0.5,
+    yAnchor: 1,
+    zIndex: 10,
+    clickable: true
+  });
+  kakao.maps.event.addListener(state.map, 'click', closeStationInfo);
   kakao.maps.event.addListener(state.map, 'zoom_changed', renderMapLayers);
   kakao.maps.event.addListener(state.map, 'idle', refreshPointVisibility);
   window.addEventListener('resize', () => state.map.relayout());
