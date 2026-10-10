@@ -293,6 +293,7 @@ function selectStation(station, options = {}) {
     elements.districtFilter.value = station.gu;
   }
   state.selectedStationId = station.stationId;
+  syncSelectedMarker();
   state.page = Math.max(1, Math.ceil((sortedRows().findIndex((item) => item.stationId === station.stationId) + 1) / config.pageSize));
   renderDashboard();
   renderSelectedStation(station);
@@ -493,9 +494,26 @@ function mapStage() {
 function markerImageFor(station) {
   const risk = riskAt(station, state.horizon);
   const color = risk.type === 'shortage' ? '#c74735' : risk.type === 'surplus' ? '#2768a6' : '#52655a';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36"><path d="M14 1C6.82 1 1 6.82 1 14c0 9.5 13 21 13 21s13-11.5 13-21C27 6.82 21.18 1 14 1Z" fill="${color}" stroke="white" stroke-width="2"/><circle cx="14" cy="14" r="4" fill="white"/></svg>`;
-  return new kakao.maps.MarkerImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, new kakao.maps.Size(28, 36), {
-    offset: new kakao.maps.Point(14, 36)
+  const selected = station.stationId === state.selectedStationId;
+  const width = selected ? 42 : 28;
+  const height = selected ? 54 : 36;
+  const anchor = selected ? 21 : 14;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 28 36"><path d="M14 1C6.82 1 1 6.82 1 14c0 9.5 13 21 13 21s13-11.5 13-21C27 6.82 21.18 1 14 1Z" fill="${color}" stroke="white" stroke-width="2"/><circle cx="14" cy="14" r="4" fill="white"/></svg>`;
+  return new kakao.maps.MarkerImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, new kakao.maps.Size(width, height), {
+    offset: new kakao.maps.Point(anchor, height)
+  });
+}
+
+function syncSelectedMarker() {
+  const stationsById = new Map(state.allStations.map((station) => [station.stationId, station]));
+  state.markers.forEach((marker, stationId) => {
+    const station = stationsById.get(stationId);
+    if (!station) {
+      marker.setZIndex(0);
+      return;
+    }
+    marker.setImage(markerImageFor(station));
+    marker.setZIndex(stationId === state.selectedStationId ? 10 : 0);
   });
 }
 
@@ -506,6 +524,7 @@ function getMarker(station) {
       position: new kakao.maps.LatLng(station.lat, station.lon),
       title: station.stationName,
       image: markerImageFor(station),
+      zIndex: station.stationId === state.selectedStationId ? 10 : 0,
       clickable: true
     });
     kakao.maps.event.addListener(marker, 'click', () => {
@@ -517,6 +536,7 @@ function getMarker(station) {
     marker.setPosition(new kakao.maps.LatLng(station.lat, station.lon));
     marker.setImage(markerImageFor(station));
   }
+  marker.setZIndex(station.stationId === state.selectedStationId ? 10 : 0);
   return marker;
 }
 
@@ -600,6 +620,7 @@ function focusStation(station) {
     elements.districtFilter.value = station.gu;
   }
   state.selectedStationId = station.stationId;
+  syncSelectedMarker();
   const rows = sortedRows();
   const index = rows.findIndex((item) => item.stationId === station.stationId);
   state.page = index >= 0 ? Math.floor(index / config.pageSize) + 1 : 1;
