@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f5f1">
+  <title>서울 따릉이 현황</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #182923;
+      --muted: #69756f;
+      --line: #dce3dc;
+      --paper: #f3f5f1;
+      --white: #fff;
+      --green: #087a52;
+      --green-dark: #075d40;
+      --orange: #ec7144;
+      --mono: "DM Mono", Consolas, monospace;
+      --sans: "IBM Plex Sans KR", "Malgun Gothic", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body { min-width: 320px; color: var(--ink); background: var(--paper); font-family: var(--sans); }
+    button, input { font: inherit; }
+    button { color: inherit; }
+
+    .app { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 520px; padding: 0 28px 24px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; min-height: 82px; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .brand-mark { display: grid; width: 39px; height: 39px; place-items: center; border-radius: 12px; color: #fff; background: var(--green); font-size: 20px; }
+    .brand-copy { display: flex; align-items: baseline; gap: 10px; }
+    .brand-copy h1 { margin: 0; font-size: 19px; font-weight: 700; }
+    .brand-copy span, .eyebrow, .mono { font-family: var(--mono); }
+    .brand-copy span { color: var(--muted); font-size: 10px; letter-spacing: 0; }
+    .live-meta { display: flex; align-items: center; gap: 17px; color: var(--muted); font-size: 12px; }
+    .live-indicator { display: inline-flex; align-items: center; gap: 7px; color: var(--green-dark); font-family: var(--mono); font-size: 10px; }
+    .live-indicator::before { width: 7px; height: 7px; border-radius: 50%; background: #39a879; content: ""; box-shadow: 0 0 0 3px #39a87922; }
+
+    .toolbar { display: flex; align-items: center; gap: 10px; min-height: 72px; }
+    .search { position: relative; width: min(360px, 48vw); }
+    .search input { width: 100%; height: 42px; padding: 0 14px 0 40px; border: 1px solid var(--line); border-radius: 8px; outline: none; color: var(--ink); background: var(--white); }
+    .search input:focus { border-color: var(--green); box-shadow: 0 0 0 3px #087a5218; }
+    .search-icon { position: absolute; top: 11px; left: 14px; color: #718078; font-size: 16px; }
+    .toolbar-spacer { flex: 1; }
+    .check-control { display: inline-flex; align-items: center; gap: 8px; padding: 0 9px; color: #46534c; font-size: 13px; white-space: nowrap; cursor: pointer; }
+    .check-control input { width: 16px; height: 16px; accent-color: var(--green); }
+    .refresh-button { display: inline-flex; height: 42px; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); font-size: 13px; cursor: pointer; }
+    .refresh-button:hover { border-color: #9caaa1; }
+    .refresh-button:disabled { opacity: .55; cursor: wait; }
+    .refresh-icon { color: var(--green); font-size: 18px; }
+
+    .workspace { display: grid; flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) 370px; grid-template-rows: minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--white); box-shadow: 0 8px 30px #21392a0a; }
+    .map-frame { position: relative; min-width: 0; min-height: 0; background: #e5eae5; }
+    #map { position: absolute; inset: 0; }
+    .map-caption { position: absolute; z-index: 2; top: 16px; left: 16px; display: flex; align-items: center; gap: 9px; padding: 9px 12px; border: 1px solid #dce3dc; border-radius: 7px; background: #ffffffed; box-shadow: 0 3px 12px #17261d12; font-size: 11px; pointer-events: none; }
+    .map-caption .eyebrow { color: var(--green); font-size: 9px; }
+    .map-caption strong { font-size: 12px; }
+    .side-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-left: 1px solid var(--line); background: var(--white); }
+    .panel-header { padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+    .panel-header-top { display: flex; justify-content: space-between; align-items: center; }
+    .eyebrow { color: var(--muted); font-size: 9px; }
+    .panel-header h2 { margin: 5px 0 0; font-size: 17px; }
+    .station-count { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+    .region-form { padding: 14px 18px 12px; border-bottom: 1px solid var(--line); }
+    .region-form label { display: block; margin-bottom: 7px; color: #58665e; font-size: 11px; }
+    .region-row { display: flex; gap: 7px; }
+    .region-row input { min-width: 0; height: 39px; flex: 1; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; outline: none; background: #fff; font-size: 12px; }
+    .region-row input:focus { border-color: var(--green); box-shadow: 0 0 0 3px #087a5218; }
+    .region-row button { display: grid; width: 40px; height: 39px; place-items: center; border: 0; border-radius: 7px; color: white; background: var(--green); font-size: 17px; cursor: pointer; }
+    .region-row button:hover { background: var(--green-dark); }
+    .region-status { min-height: 16px; margin: 6px 0 0; color: var(--muted); font-size: 10px; }
+    .region-status.error { color: #b64025; }
+    .list-label { display: flex; justify-content: space-between; padding: 12px 19px 8px; color: var(--muted); font-size: 10px; }
+    .panel-content { flex: 1; min-height: 0; overflow: auto; padding: 0 14px 12px; }
+    .district-group { border-bottom: 1px solid #edf0ec; }
+    .district-group summary { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: 8px; list-style: none; cursor: pointer; }
+    .district-group summary::-webkit-details-marker { display: none; }
+    .district-name { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+    .district-name::before { width: 6px; height: 6px; border: 1.5px solid var(--green); border-radius: 50%; content: ""; }
+    .district-meta { display: inline-flex; align-items: center; gap: 9px; color: var(--muted); font-family: var(--mono); font-size: 10px; }
+    .district-chevron { color: #748178; font-size: 13px; transition: transform .15s ease; }
+    .district-group[open] .district-chevron { transform: rotate(90deg); }
+    .station-list { padding: 0 0 8px 12px; }
+    .station-row { display: flex; width: 100%; min-height: 40px; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 7px; border: 0; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; }
+    .station-row:hover, .station-row.selected { background: #eff7f2; }
+    .station-row-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+    .station-row-name { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .station-row-address { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .station-row-count { flex: 0 0 auto; color: var(--green-dark); font-family: var(--mono); font-size: 11px; }
+    .station-row-count.none { color: #c1532c; }
+    .selected-panel { max-height: 38%; flex: 0 0 auto; overflow: auto; border-top: 1px solid var(--line); background: #fbfcfa; }
+    .selected-panel[hidden] { display: none; }
+    .selected-panel-head { position: sticky; top: 0; display: flex; min-height: 37px; align-items: center; justify-content: space-between; padding: 0 17px; border-bottom: 1px solid #edf0ec; background: #fbfcfa; }
+    .selected-panel-head button { display: grid; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 17px; cursor: pointer; }
+    .selected-panel-head button:hover { background: #edf1ec; }
+    .selected-panel .panel-content { overflow: visible; padding: 12px 17px 15px; }
+    .selected-panel .detail-title { margin: 0 0 10px; font-size: 15px; }
+    .selected-panel .availability { padding: 10px 12px; }
+    .selected-panel .availability-value { font-size: 22px; }
+    .selected-panel .detail-grid { margin-top: 8px; }
+    .selected-panel .detail-grid div { padding: 7px 0; }
+    .panel-foot { padding: 10px 17px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .empty-state { display: flex; min-height: 230px; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+    .empty-symbol { display: grid; width: 48px; height: 48px; place-items: center; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 15px; color: var(--green); background: #f5f8f4; font-size: 22px; }
+    .empty-state strong { font-size: 14px; }
+    .empty-state p { max-width: 230px; margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .sample-note { margin-top: 18px; padding: 11px 12px; border-left: 2px solid var(--orange); background: #fff8f4; color: #765140; font-size: 11px; line-height: 1.65; text-align: left; }
+    .sample-note code { font-family: var(--mono); font-size: 10px; }
+    .detail-title { margin: 5px 0 18px; font-size: 19px; line-height: 1.45; overflow-wrap: anywhere; }
+    .detail-id { display: block; margin-top: 4px; color: var(--muted); font-family: var(--mono); font-size: 10px; font-weight: 400; }
+    .availability { display: flex; align-items: center; justify-content: space-between; padding: 15px 14px; border-radius: 8px; background: #eff7f2; }
+    .availability.none { background: #fff3ed; }
+    .availability-label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 11px; }
+    .availability-value { color: var(--green-dark); font-family: var(--mono); font-size: 28px; line-height: 1; }
+    .availability.none .availability-value { color: #c1532c; }
+    .availability-value small { margin-left: 4px; font-family: var(--sans); font-size: 12px; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; margin: 18px 0 0; }
+    .detail-grid div { padding: 12px 0; border-bottom: 1px solid #edf0ec; }
+    .detail-grid dt { margin-bottom: 6px; color: var(--muted); font-size: 10px; }
+    .detail-grid dd { margin: 0; font-family: var(--mono); font-size: 13px; }
+    .panel-foot { padding: 12px 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .status-error { color: #b64025; }
+
+    @media (max-width: 760px) {
+      .app { min-height: 620px; padding: 0 14px 14px; }
+      .topbar { min-height: 68px; }
+      .brand-copy { display: block; }
+      .brand-copy h1 { font-size: 17px; }
+      .brand-copy span { display: block; margin-top: 2px; }
+      .live-meta { gap: 8px; font-size: 10px; }
+      .toolbar { min-height: 64px; gap: 7px; }
+      .search { flex: 1; width: auto; }
+      .search input { height: 40px; padding-left: 34px; font-size: 12px; }
+      .search-icon { left: 11px; }
+      .refresh-button { width: 40px; justify-content: center; padding: 0; }
+      .refresh-label { display: none; }
+      .check-control { gap: 5px; padding: 0 3px; font-size: 11px; }
+      .workspace { grid-template-columns: minmax(0, 1fr) 320px; }
+      .panel-header { padding: 15px 16px 12px; }
+      .region-form { padding: 11px 14px 8px; }
+      .list-label { padding-right: 15px; padding-left: 15px; }
+      .panel-content { padding-right: 11px; padding-left: 11px; }
+      .panel-foot { padding: 9px 14px; }
+    }
+    @media (max-width: 600px) {
+      .app { min-height: 680px; padding: 0 10px 10px; }
+      .live-meta #updatedAt { display: none; }
+      .brand-mark { width: 35px; height: 35px; }
+      .check-control { font-size: 10px; }
+      .workspace { display: flex; flex-direction: column; }
+      .map-frame { flex: 0 0 39%; min-height: 230px; }
+      .side-panel { min-height: 0; flex: 1; border-top: 1px solid var(--line); border-left: 0; }
+      .panel-header { padding: 10px 15px 8px; }
+      .panel-header h2 { margin-top: 3px; font-size: 15px; }
+      .region-form { padding: 8px 13px 6px; }
+      .region-form label { margin-bottom: 4px; }
+      .region-row input, .region-row button { height: 35px; }
+      .region-status { min-height: 12px; margin-top: 3px; }
+      .list-label { padding: 7px 14px 4px; }
+      .panel-content { padding: 0 10px 8px; }
+      .district-group summary { min-height: 36px; }
+      .station-row { min-height: 36px; }
+      .empty-state { min-height: 100px; }
+      .empty-symbol { display: none; }
+      .empty-state p { margin-top: 5px; }
+      .selected-panel { max-height: 35%; }
+      .selected-panel .panel-content { padding: 9px 13px 12px; }
+      .panel-foot { display: none; }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .workspace { animation: enter .45s ease-out both; }
+      @keyframes enter { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">따</div>
+        <div class="brand-copy">
+          <h1>따릉이 현황</h1>
+          <span>SEOUL PUBLIC BIKE</span>
+        </div>
+      </div>
+      <div class="live-meta">
+        <span class="live-indicator" id="dataSource">연결 중</span>
+        <span id="updatedAt">정보를 불러오는 중</span>
+      </div>
+    </header>
+
+    <section class="toolbar" aria-label="대여소 검색 및 필터">
+      <label class="search">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input id="searchInput" type="search" placeholder="대여소명 또는 번호 검색" autocomplete="off" aria-label="대여소명 또는 번호 검색">
+      </label>
+      <div class="toolbar-spacer"></div>
+      <label class="check-control"><input id="availableOnly" type="checkbox"> 대여 가능만</label>
+      <button class="refresh-button" id="refreshButton" type="button" title="대여소 정보 새로고침">
+        <span class="refresh-icon" aria-hidden="true">↻</span><span class="refresh-label">새로고침</span>
+      </button>
+    </section>
+
+    <main class="workspace">
+      <section class="map-frame" aria-label="서울 따릉이 대여소 지도">
+        <div id="map"></div>
+        <div class="map-caption"><span class="eyebrow">SEOUL / MAP</span><strong id="mapLocation">서울 전체</strong></div>
+      </section>
+
+      <aside class="side-panel">
+        <div class="panel-header">
+          <div class="panel-header-top">
+            <span class="eyebrow">SEOUL / DISTRICTS</span>
+            <span class="station-count" id="stationCount">-</span>
+          </div>
+          <h2 id="panelHeading">구별 대여소</h2>
+        </div>
+        <form class="region-form" id="regionForm">
+          <label for="regionInput">지역 설정 · 입력한 곳으로 지도 이동</label>
+          <div class="region-row">
+            <input id="regionInput" type="search" placeholder="구·동·주소 (예: 마포구)" autocomplete="off">
+            <button type="submit" aria-label="입력한 지역으로 이동" title="지역으로 이동">↗</button>
+          </div>
+          <p class="region-status" id="regionStatus" aria-live="polite"></p>
+        </form>
+        <div class="list-label"><span>서울특별시 · 자치구 순</span><span>대여소명 / 잔여 대수</span></div>
+        <div class="panel-content" id="stationList" aria-live="polite"></div>
+        <section class="selected-panel" id="selectedPanel" hidden>
+          <div class="selected-panel-head">
+            <span class="eyebrow">STATION DETAIL</span>
+            <button id="closeSelected" type="button" aria-label="상세 닫기" title="상세 닫기">×</button>
+          </div>
+          <div class="panel-content" id="stationDetail"></div>
+        </section>
+        <div class="panel-foot" id="panelFoot">서울특별시 공공자전거 따릉이 실시간 대여정보</div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=db90fddc5d2042d05f04f1e1bfdd94c7&libraries=services"></script>
+  <script>
+    const mapElement = document.getElementById('map');
+    const searchInput = document.getElementById('searchInput');
+    const availableOnly = document.getElementById('availableOnly');
+    const refreshButton = document.getElementById('refreshButton');
+    const stationDetail = document.getElementById('stationDetail');
+    const stationCount = document.getElementById('stationCount');
+    const stationList = document.getElementById('stationList');
+    const dataSource = document.getElementById('dataSource');
+    const updatedAt = document.getElementById('updatedAt');
+    const regionForm = document.getElementById('regionForm');
+    const regionInput = document.getElementById('regionInput');
+    const regionStatus = document.getElementById('regionStatus');
+    const selectedPanel = document.getElementById('selectedPanel');
+    const mapLocation = document.getElementById('mapLocation');
+    let map;
+    let geocoder;
+    let stations = [];
+    let stationMarkers = new Map();
+    let selectedStationId = null;
+
+    function textElement(tagName, className, text) {
+      const element = document.createElement(tagName);
+      if (className) element.className = className;
+      element.textContent = text;
+      return element;
+    }
+
+    function renderListEmpty(title, message, isError = false) {
+      stationList.replaceChildren();
+      const state = textElement('div', 'empty-state', '');
+      const symbol = textElement('div', 'empty-symbol', isError ? '!' : '⌖');
+      symbol.setAttribute('aria-hidden', 'true');
+      const heading = textElement('strong', isError ? 'status-error' : '', title);
+      const description = textElement('p', '', message);
+      state.append(symbol, heading, description);
+
+      if (isError) {
+        const note = textElement('div', 'sample-note', 'bike_api 키가 없으면 샘플 5개가 표시됩니다. 전체 대여소를 보려면 .env에 bike_api를 설정하고 서버를 다시 시작하세요.');
+        state.append(note);
+      }
+      stationList.append(state);
+      stationCount.textContent = '0곳';
+    }
+
+    function renderStation(station) {
+      selectedPanel.hidden = false;
+      stationDetail.replaceChildren();
+      const name = textElement('h3', 'detail-title', station.name || '이름 없는 대여소');
+      name.append(textElement('span', 'detail-id', station.id || 'ID 정보 없음'));
+
+      const available = Number.isFinite(station.bikeCount) ? station.bikeCount : 0;
+      const capacity = Number.isFinite(station.rackCount) ? station.rackCount : 0;
+      const availability = textElement('div', `availability${available === 0 ? ' none' : ''}`, '');
+      const label = textElement('div', 'availability-label', '현재 대여 가능');
+      label.append(textElement('span', '', available === 0 ? '이용 가능한 자전거 없음' : '대여소 실시간 현황'));
+      const value = textElement('div', 'availability-value', String(available));
+      value.append(textElement('small', '', '대'));
+      availability.append(label, value);
+
+      const grid = document.createElement('dl');
+      grid.className = 'detail-grid';
+      const details = [
+        ['자치구', station.district || '-'],
+        ['주소', station.address || '-'],
+        ['전체 거치대', capacity === 0 ? '-' : `${capacity}대`],
+        ['거치율', station.shared == null ? '-' : `${station.shared}%`],
+        ['대여소 번호', station.id || '-'],
+        ['남은 거치공간', capacity ? `${Math.max(0, capacity - available)}석` : '-'],
+        ['위도', station.latitude == null ? '-' : Number(station.latitude).toFixed(5)],
+        ['경도', station.longitude == null ? '-' : Number(station.longitude).toFixed(5)]
+      ];
+      for (const [key, value] of Object.entries(station.extra || {})) {
+        details.push([key, value == null ? '-' : String(value)]);
+      }
+
+      for (const [labelText, valueText] of details) {
+        const item = document.createElement('div');
+        item.append(textElement('dt', '', labelText), textElement('dd', '', valueText));
+        grid.append(item);
+      }
+
+      stationDetail.append(name, availability, grid);
+    }
+
+    function filteredStations() {
+      const query = searchInput.value.trim().toLocaleLowerCase('ko-KR');
+      return stations.filter((station) => {
+        const searchable = `${station.name} ${station.id} ${station.district} ${station.address}`.toLocaleLowerCase('ko-KR');
+        const matchesQuery = !query || searchable.includes(query);
+        const matchesAvailability = !availableOnly.checked || station.bikeCount > 0;
+        return matchesQuery && matchesAvailability;
+      });
+    }
+
+    function renderMarkers(visibleStations) {
+      const visibleIds = new Set(visibleStations.map((station) => station.id));
+      const currentIds = new Set(stations.map((station) => station.id));
+
+      for (const [stationId, marker] of stationMarkers) {
+        if (!currentIds.has(stationId)) {
+          marker.setMap(null);
+          stationMarkers.delete(stationId);
+        }
+      }
+
+      for (const station of stations) {
+        if (!Number.isFinite(station.latitude) || !Number.isFinite(station.longitude)) continue;
+        let marker = stationMarkers.get(station.id);
+        if (!marker) {
+          marker = new kakao.maps.Marker({
+            map,
+            position: new kakao.maps.LatLng(station.latitude, station.longitude),
+            title: `${station.name} · ${station.bikeCount ?? 0}대`
+          });
+          kakao.maps.event.addListener(marker, 'click', () => selectStation(station, false));
+          stationMarkers.set(station.id, marker);
+        } else {
+          marker.setPosition(new kakao.maps.LatLng(station.latitude, station.longitude));
+          marker.setTitle(`${station.name} · ${station.bikeCount ?? 0}대`);
+        }
+        marker.setVisible(visibleIds.has(station.id));
+      }
+    }
+
+    function renderStations(updateMarkers = true) {
+      const visibleStations = filteredStations();
+      const districts = new Map();
+
+      for (const station of visibleStations) {
+        const district = station.district || '기타';
+        if (!districts.has(district)) districts.set(district, []);
+        districts.get(district).push(station);
+      }
+
+      stationList.replaceChildren();
+      const sortedDistricts = [...districts.keys()].sort((left, right) => left.localeCompare(right, 'ko-KR'));
+      for (const district of sortedDistricts) {
+        const districtStations = districts.get(district).sort((left, right) => left.name.localeCompare(right.name, 'ko-KR'));
+        const group = document.createElement('details');
+        group.className = 'district-group';
+        group.dataset.district = district;
+        group.open = true;
+
+        const summary = document.createElement('summary');
+        const name = textElement('span', 'district-name', district);
+        const meta = textElement('span', 'district-meta', `${districtStations.length}곳`);
+        const chevron = textElement('span', 'district-chevron', '›');
+        chevron.setAttribute('aria-hidden', 'true');
+        meta.append(chevron);
+        summary.append(name, meta);
+
+        const list = textElement('div', 'station-list', '');
+        for (const station of districtStations) {
+          const button = textElement('button', `station-row${station.id === selectedStationId ? ' selected' : ''}`, '');
+          button.type = 'button';
+          button.setAttribute('aria-label', `${station.name}, 대여 가능 ${station.bikeCount ?? 0}대`);
+          const copy = textElement('span', 'station-row-copy', '');
+          copy.append(textElement('span', 'station-row-name', station.name));
+          copy.append(textElement('span', 'station-row-address', station.address || station.id));
+          const bikeCount = Number.isFinite(station.bikeCount) ? station.bikeCount : 0;
+          const count = textElement('span', `station-row-count${bikeCount === 0 ? ' none' : ''}`, `${bikeCount}대`);
+          button.append(copy, count);
+          button.addEventListener('click', () => selectStation(station));
+          list.append(button);
+        }
+
+        group.append(summary, list);
+        stationList.append(group);
+      }
+
+      stationCount.textContent = `${visibleStations.length.toLocaleString('ko-KR')}곳`;
+
+      if (selectedStationId && !visibleStations.some((station) => station.id === selectedStationId)) {
+        selectedStationId = null;
+        selectedPanel.hidden = true;
+      }
+
+      if (updateMarkers && map) renderMarkers(visibleStations);
+
+      if (visibleStations.length === 0) {
+        renderListEmpty('조건에 맞는 대여소가 없습니다', '검색어나 대여 가능 필터를 확인해 주세요.');
+      }
+    }
+
+    function selectStation(station, moveMap = true) {
+      selectedStationId = station.id;
+      renderStations(false);
+      renderStation(station);
+      if (moveMap && Number.isFinite(station.latitude) && Number.isFinite(station.longitude)) {
+        map.setLevel(4);
+        map.panTo(new kakao.maps.LatLng(station.latitude, station.longitude));
+      }
+      mapLocation.textContent = [station.district, station.name].filter(Boolean).join(' · ');
+    }
+
+    function focusDistrict(district) {
+      const districtStations = stations.filter((station) => station.district === district);
+      const group = [...stationList.querySelectorAll('.district-group')]
+        .find((item) => item.dataset.district === district);
+      if (group) {
+        group.open = true;
+        group.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      const coordinates = districtStations
+        .filter((station) => Number.isFinite(station.latitude) && Number.isFinite(station.longitude))
+        .map((station) => new kakao.maps.LatLng(station.latitude, station.longitude));
+      if (coordinates.length === 0) return false;
+
+      const bounds = new kakao.maps.LatLngBounds();
+      coordinates.forEach((coordinate) => bounds.extend(coordinate));
+      map.setBounds(bounds, 56, 56, 56, 56);
+      mapLocation.textContent = `서울특별시 ${district}`;
+      regionStatus.classList.remove('error');
+      regionStatus.textContent = `서울특별시 ${district}로 지도를 이동했습니다.`;
+      return true;
+    }
+
+    function moveToRegion(query) {
+      const normalizedQuery = query.replace(/서울특별시|서울시/g, '').replace(/\s+/g, '').toLocaleLowerCase('ko-KR');
+      const district = [...new Set(stations.map((station) => station.district).filter(Boolean))]
+        .find((name) => name.replace(/\s+/g, '').toLocaleLowerCase('ko-KR') === normalizedQuery);
+      if (district && focusDistrict(district)) return;
+
+      const address = /서울/.test(query) ? query : `서울특별시 ${query}`;
+      geocoder.addressSearch(address, (results, status) => {
+        if (status !== kakao.maps.services.Status.OK || results.length === 0) {
+          regionStatus.classList.add('error');
+          regionStatus.textContent = '서울에서 해당 위치를 찾지 못했습니다.';
+          return;
+        }
+
+        const result = results[0];
+        const position = new kakao.maps.LatLng(Number(result.y), Number(result.x));
+        map.setLevel(4);
+        map.panTo(position);
+        mapLocation.textContent = result.address_name || query;
+        regionStatus.classList.remove('error');
+        regionStatus.textContent = `${result.address_name || query}(으)로 이동했습니다.`;
+      });
+    }
+
+    function setupMap() {
+      map = new kakao.maps.Map(mapElement, {
+        center: new kakao.maps.LatLng(37.5665, 126.9780),
+        level: 9
+      });
+      geocoder = new kakao.maps.services.Geocoder();
+      window.addEventListener('resize', () => map.relayout());
+      loadStations();
+    }
+
+    async function loadStations() {
+      refreshButton.disabled = true;
+      dataSource.textContent = '불러오는 중';
+      try {
+        const response = await fetch('/api/stations', { cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || '대여소 정보를 가져오지 못했습니다.');
+
+        stations = payload.stations || [];
+        selectedStationId = null;
+        selectedPanel.hidden = true;
+        if (stations.length === 0) {
+          renderListEmpty('표시할 대여소가 없습니다', '잠시 후 새로고침을 눌러 다시 확인해 주세요.');
+        }
+
+        dataSource.textContent = payload.source === 'sample' ? '샘플 데이터' : '실시간 데이터';
+        updatedAt.textContent = `업데이트 ${new Date(payload.fetchedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`;
+        document.getElementById('panelFoot').textContent = payload.source === 'sample'
+          ? '샘플 API 응답 5개 · 전체 대여소는 서울 API 키 필요'
+          : '서울특별시 공공자전거 따릉이 실시간 대여정보';
+        renderStations();
+
+        const coordinates = stations
+          .filter((station) => Number.isFinite(station.latitude) && Number.isFinite(station.longitude))
+          .map((station) => new kakao.maps.LatLng(station.latitude, station.longitude));
+        if (coordinates.length > 1) {
+          const bounds = new kakao.maps.LatLngBounds();
+          coordinates.forEach((coordinate) => bounds.extend(coordinate));
+          map.setBounds(bounds, 36, 36, 36, 36);
+        } else if (coordinates.length === 1) {
+          map.setCenter(coordinates[0]);
+        }
+        mapLocation.textContent = '서울 전체';
+      } catch (error) {
+        dataSource.textContent = '연결 오류';
+        updatedAt.textContent = '정보를 불러오지 못했습니다';
+        renderMarkers([]);
+        renderListEmpty('대여소 정보를 불러오지 못했습니다', error.message, true);
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+
+    searchInput.addEventListener('input', renderStations);
+    availableOnly.addEventListener('change', renderStations);
+    refreshButton.addEventListener('click', loadStations);
+    regionForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const query = regionInput.value.trim();
+      if (query) moveToRegion(query);
+    });
+    document.getElementById('closeSelected').addEventListener('click', () => {
+      selectedStationId = null;
+      selectedPanel.hidden = true;
+      renderStations(false);
+    });
+    window.setInterval(() => {
+      if (!document.hidden) loadStations();
+    }, 60000);
+
+    if (window.kakao && window.kakao.maps) {
+      kakao.maps.load(setupMap);
+    } else {
+      dataSource.textContent = '지도 연결 오류';
+      renderListEmpty('카카오 지도를 불러오지 못했습니다', '카카오 개발자 콘솔에서 현재 접속 주소의 JavaScript 도메인을 등록했는지 확인해 주세요.', true);
+    }
+  </script>
+</body>
+</html>

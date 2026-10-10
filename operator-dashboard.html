@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f1f3f0">
+  <title>바이바이크 | 운영 대시보드</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard-config.js"></script>
+  <script>document.write(`<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(window.OPERATOR_CONFIG.kakaoJavaScriptKey)}&libraries=clusterer"><\/script>`);</script>
+  <script defer src="/dashboard.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="바이바이크 운영 대시보드 홈">
+        <span class="brand-mark" aria-hidden="true">B</span>
+        <span class="brand-name">바이바이크</span>
+        <span class="brand-divider"></span>
+        <span class="brand-section">운영 대시보드</span>
+      </a>
+      <div class="topbar-meta">
+        <span class="data-mode" id="dataMode">연결 중</span>
+        <span class="base-time" id="baseTime">기준 시각 확인 중</span>
+        <button class="icon-button" id="refreshButton" type="button" title="데이터 새로고침" aria-label="데이터 새로고침">
+          <span aria-hidden="true">↻</span>
+        </button>
+      </div>
+      <div class="search-wrap" id="searchWrap">
+        <label class="search-field">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="stationSearch" type="search" role="combobox" aria-label="대여소 또는 자치구 검색" aria-expanded="false" aria-controls="searchSuggestions" aria-autocomplete="list" placeholder="대여소명, ID, 자치구 검색">
+          <kbd>Ctrl K</kbd>
+        </label>
+        <div class="suggestions" id="searchSuggestions" role="listbox" hidden></div>
+      </div>
+    </header>
+
+    <main class="dashboard-layout" id="dashboardLayout">
+      <section class="map-panel" aria-label="서울 자전거 수급 위험 지도">
+        <div class="map-topline">
+          <div class="map-heading">
+            <span class="section-kicker">LIVE OPERATIONS / SEOUL</span>
+            <strong id="mapTitle">서울 전체</strong>
+          </div>
+          <div class="map-period" role="group" aria-label="지도 위험도 기준 시간">
+            <button type="button" data-horizon="now" class="active">현재</button>
+            <button type="button" data-horizon="h1">+1시간</button>
+            <button type="button" data-horizon="h3">+3시간</button>
+          </div>
+        </div>
+        <div id="map" aria-label="카카오 지도"></div>
+        <div class="map-legend" aria-label="지도 위험 범례">
+          <span><i class="legend-dot shortage"></i>부족</span>
+          <span><i class="legend-dot surplus"></i>과잉</span>
+          <span><i class="legend-dot normal"></i>안정</span>
+        </div>
+        <div class="map-status" id="mapStatus">위험 대여소를 불러오는 중</div>
+      </section>
+
+      <div class="resize-handle" id="resizeHandle" role="separator" aria-label="지도와 목록 너비 조절" aria-orientation="vertical" tabindex="0"></div>
+
+      <aside class="operations-panel" aria-label="수급 위험도 순위">
+        <section class="filter-block">
+          <div class="panel-title-row">
+            <div>
+              <span class="section-kicker">REBALANCING QUEUE</span>
+              <h1>위험도 순위</h1>
+            </div>
+            <button class="text-button export-button" id="exportCsv" type="button" title="현재 필터 결과 CSV 다운로드">
+              <span aria-hidden="true">↓</span> CSV
+            </button>
+          </div>
+          <div class="filter-row">
+            <div class="segmented" role="group" aria-label="위험 유형 필터">
+              <button type="button" data-risk="shortage" class="active">부족</button>
+              <button type="button" data-risk="surplus">과잉</button>
+              <button type="button" data-risk="all">전체</button>
+            </div>
+            <label class="district-select-wrap">
+              <span class="sr-only">자치구 필터</span>
+              <select id="districtFilter" aria-label="자치구 필터">
+                <option value="">전체 자치구</option>
+              </select>
+              <button class="clear-district" id="clearDistrict" type="button" title="자치구 필터 해제" aria-label="자치구 필터 해제" hidden>×</button>
+            </label>
+          </div>
+          <div class="active-filter" id="activeFilter" hidden></div>
+        </section>
+
+        <section class="summary-block" aria-label="시간대별 수급 요약">
+          <div class="summary-heading">
+            <h2>수급 요약</h2>
+            <span id="summaryScope">서울 전체</span>
+          </div>
+          <div class="summary-grid">
+            <article class="summary-cell" data-summary="now">
+              <span class="summary-time">현재</span>
+              <strong class="summary-count">--</strong>
+              <span class="summary-units">집계 중</span>
+            </article>
+            <article class="summary-cell" data-summary="h1">
+              <span class="summary-time">+1시간</span>
+              <strong class="summary-count">--</strong>
+              <span class="summary-units">집계 중</span>
+            </article>
+            <article class="summary-cell" data-summary="h3">
+              <span class="summary-time">+3시간</span>
+              <strong class="summary-count">--</strong>
+              <span class="summary-units">집계 중</span>
+            </article>
+          </div>
+        </section>
+
+        <section class="risk-table-section">
+          <div class="table-toolbar">
+            <div class="table-result" id="resultCount">대여소를 불러오는 중</div>
+            <label class="sort-select-wrap">
+              <span class="sr-only">위험도 정렬</span>
+              <select id="sortSelect" aria-label="위험도 정렬">
+                <option value="shortageH3">+3시간 부족 대수순</option>
+                <option value="shortageNow">현재 부족 대수순</option>
+                <option value="surplusH3">+3시간 과잉 대수순</option>
+                <option value="stationName">대여소명순</option>
+              </select>
+            </label>
+          </div>
+          <div class="table-scroll" id="tableScroll">
+            <table class="risk-table">
+              <thead>
+                <tr>
+                  <th scope="col" class="station-column">대여소</th>
+                  <th scope="col"><button type="button" data-sort="now">현재</button></th>
+                  <th scope="col"><button type="button" data-sort="h1">+1시간</button></th>
+                  <th scope="col"><button type="button" data-sort="h3">+3시간</button></th>
+                </tr>
+              </thead>
+              <tbody id="riskRows"></tbody>
+            </table>
+            <div class="table-empty" id="tableEmpty" hidden>현재 조건에 해당하는 대여소가 없습니다.</div>
+          </div>
+          <div class="pagination">
+            <span id="pageStatus">0 / 0</span>
+            <div class="page-actions">
+              <button id="previousPage" type="button" aria-label="이전 페이지" title="이전 페이지" disabled>‹</button>
+              <button id="nextPage" type="button" aria-label="다음 페이지" title="다음 페이지" disabled>›</button>
+            </div>
+          </div>
+        </section>
+        <footer class="panel-footer">
+          <span id="thresholdNote">기준: 임시값</span>
+          <span class="forecast-note" id="forecastNote">예측값은 데모 시뮬레이션</span>
+        </footer>
+      </aside>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  </div>
+</body>
+</html>
