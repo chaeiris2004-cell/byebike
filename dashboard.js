@@ -20,6 +20,8 @@ const state = {
   map: null,
   clusterer: null,
   infoOverlay: null,
+  districtLegend: null,
+  districtLegendMaximum: null,
   markers: new Map(),
   districtOverlays: [],
   mapStage: '',
@@ -459,22 +461,31 @@ function districtRisk(stations) {
   }, 0);
   const selectedCount = state.risk === 'surplus' ? surplus : state.risk === 'all' ? shortage + surplus : shortage;
   const selectedUnits = state.risk === 'surplus' ? surplusUnits : state.risk === 'all' ? shortageUnits + surplusUnits : shortageUnits;
-  return { shortage, surplus, shortageUnits, surplusUnits, selectedCount, selectedUnits };
+  const total = stations.length;
+  const shortageRatio = total ? shortage / total : 0;
+  const surplusRatio = total ? surplus / total : 0;
+  const ratio = state.risk === 'surplus' ? surplusRatio
+    : state.risk === 'all' ? Math.max(shortageRatio, surplusRatio) : shortageRatio;
+  const color = state.risk === 'surplus' ? 'surplus'
+    : state.risk === 'all' ? shortage > surplus ? 'shortage' : surplus > shortage ? 'surplus' : 'normal'
+      : 'shortage';
+  return { shortage, surplus, shortageUnits, surplusUnits, selectedCount, selectedUnits, shortageRatio, surplusRatio, ratio, color };
 }
 
-function makeDistrictBubble(district, stations) {
+function makeDistrictBubble(district, stations, intensity) {
   const metrics = districtRisk(stations);
   const content = document.createElement('button');
   content.type = 'button';
-  content.className = `district-bubble ${state.risk === 'surplus' ? 'surplus' : metrics.selectedCount ? 'shortage' : 'normal'}`;
+  content.className = `district-bubble ${metrics.color}${intensity < 0.5 ? ' light' : ''}`;
+  content.style.setProperty('--intensity', `${intensity * 100}%`);
   content.style.width = `${Math.min(142, 82 + metrics.selectedCount * 1.4)}px`;
   content.style.minHeight = `${Math.min(82, 58 + metrics.selectedCount * 0.35)}px`;
   content.append(textNode('strong', district));
   const subline = state.risk === 'surplus'
-    ? `과잉 ${metrics.surplus}곳 / +${metrics.surplusUnits}대`
+    ? `과잉 ${metrics.surplus}곳 (${Math.round(metrics.surplusRatio * 100)}%) / +${metrics.surplusUnits}대`
     : state.risk === 'all'
-      ? `부족 ${metrics.shortage} · 과잉 ${metrics.surplus}`
-      : `부족 ${metrics.shortage}곳 / −${metrics.shortageUnits}대`;
+      ? `부족 ${metrics.shortage} (${Math.round(metrics.shortageRatio * 100)}%) · 과잉 ${metrics.surplus} (${Math.round(metrics.surplusRatio * 100)}%)`
+      : `부족 ${metrics.shortage}곳 (${Math.round(metrics.shortageRatio * 100)}%) / −${metrics.shortageUnits}대`;
   content.append(textNode('span', subline));
   content.addEventListener('click', (event) => {
     event.preventDefault();
@@ -486,10 +497,15 @@ function makeDistrictBubble(district, stations) {
     renderDashboard();
     focusDistrict(district);
   });
-  const center = stations.reduce((acc, station) => ({ lat: acc.lat + station.lat, lon: acc.lon + station.lon }), { lat: 0, lon: 0 });
+  const center = stations.length
+    ? new kakao.maps.LatLng(
+      stations.reduce((sum, station) => sum + station.lat, 0) / stations.length,
+      stations.reduce((sum, station) => sum + station.lon, 0) / stations.length
+    )
+    : state.map.getCenter();
   return new kakao.maps.CustomOverlay({
     map: state.map,
-    position: new kakao.maps.LatLng(center.lat / stations.length, center.lon / stations.length),
+    position: center,
     content,
     yAnchor: 0.5,
     zIndex: 4
@@ -580,6 +596,7 @@ function renderMapLayers() {
   if (!state.map || !state.clusterer) return;
   const stage = mapStage();
   const stations = currentMapStations();
+  if (state.districtLegend) state.districtLegend.hidden = stage !== 'district';
   removeDistrictOverlays();
   state.clusterer.clear();
 
@@ -587,8 +604,18 @@ function renderMapLayers() {
   state.mapStage = stage;
 
   if (stage === 'district') {
-    for (const [district, group] of stationGroups(stations)) {
-      if (group.length) state.districtOverlays.push(makeDistrictBubble(district, group));
+    const displayDistricts = [...stationGroups(stations).keys()];
+    const allGroups = stationGroups(state.allStations);
+    const groups = displayDistricts.map((district) => [district, allGroups.get(district) || []]);
+    const maxRatio = Math.max(0, ...groups.map(([, group]) => districtRisk(group).ratio));
+    if (state.districtLegend) {
+      state.districtLegend.className = `district-legend ${state.risk}`;
+      state.districtLegendMaximum.textContent = `최대 ${Math.round(maxRatio * 100)}%`;
+    }
+    for (const [district, group] of groups) {
+      const metrics = districtRisk(group);
+      const intensity = maxRatio > 0 ? Math.max(0.25, metrics.ratio / maxRatio) : 0.25;
+      state.districtOverlays.push(makeDistrictBubble(district, group, intensity));
     }
     elements.mapStatus.textContent = `${state.district ? '자치구 범위' : '서울 전체'} · 자치구별 위험`;
     return;
@@ -833,6 +860,17 @@ function setupMap() {
     center: new kakao.maps.LatLng(37.5665, 126.9780),
     level: 9
   });
+  state.districtLegend = document.createElement('div');
+  state.districtLegend.className = 'district-legend';
+  state.districtLegend.hidden = true;
+  const legendBar = document.createElement('span');
+  legendBar.className = 'district-legend-bar';
+  const legendLabel = textNode('span', '구별 비율 낮음 → 높음');
+  const legendMaximum = textNode('span', '');
+  legendMaximum.className = 'district-legend-maximum';
+  state.districtLegend.append(legendBar, legendLabel, legendMaximum);
+  document.querySelector('.map-panel').append(state.districtLegend);
+  state.districtLegendMaximum = legendMaximum;
   state.clusterer = new kakao.maps.MarkerClusterer({
     map: state.map,
     averageCenter: true,

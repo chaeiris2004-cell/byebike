@@ -147,12 +147,19 @@ kbd { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #e1e5e1; border-radius
 .panel-footer { display: flex; flex: 0 0 auto; justify-content: space-between; gap: 8px; padding: 8px 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; }
 .forecast-note { color: #946a1f; }
 
-.district-bubble { display: flex; min-width: 82px; min-height: 58px; flex-direction: column; align-items: center; justify-content: center; padding: 7px 10px; border: 2px solid #fff; border-radius: 999px; color: #fff; box-shadow: 0 3px 10px #17261d35; cursor: pointer; transform: translateY(-50%); }
-.district-bubble.shortage { background: #b94335; }
-.district-bubble.surplus { background: #2768a6; }
-.district-bubble.normal { background: #55645b; }
+.district-bubble { --bubble-color: #55645b; display: flex; min-width: 82px; min-height: 58px; flex-direction: column; align-items: center; justify-content: center; padding: 7px 10px; border: 2px solid #fff; border-radius: 999px; color: #fff; background: color-mix(in srgb, var(--bubble-color) var(--intensity, 100%), #fff); box-shadow: 0 3px 10px #17261d35; cursor: pointer; transform: translateY(-50%); }
+.district-bubble.shortage { --bubble-color: #b94335; }
+.district-bubble.surplus { --bubble-color: #2768a6; }
+.district-bubble.normal { --bubble-color: #55645b; }
+.district-bubble.light { color: #25332b; }
 .district-bubble strong { font-size: 10px; }
 .district-bubble span { margin-top: 2px; font-family: var(--mono); font-size: 8px; white-space: nowrap; }
+.district-legend { position: absolute; z-index: 6; bottom: 14px; left: 14px; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #d9dfdb; border-radius: 6px; color: #344239; background: #ffffffed; box-shadow: 0 2px 8px #17261d1a; font-size: 10px; pointer-events: none; }
+.district-legend[hidden] { display: none; }
+.district-legend-bar { width: 72px; height: 8px; border-radius: 999px; background: linear-gradient(90deg, #f0f2f1, var(--legend-color, #55645b)); }
+.district-legend.shortage .district-legend-bar { --legend-color: #b94335; }
+.district-legend.surplus .district-legend-bar { --legend-color: #2768a6; }
+.district-legend-maximum { font-family: var(--mono); font-weight: 600; }
 .cluster-label { display: grid; width: 38px; height: 38px; place-items: center; border: 2px solid #fff; border-radius: 50%; color: #fff; background: #43594d; box-shadow: 0 2px 8px #15221b4d; font-family: var(--mono); font-size: 11px; }
 .map-info { position: relative; box-sizing: border-box; width: max-content; min-width: 160px; max-width: min(260px, 80vw); padding: 12px 14px; border-radius: 8px; color: var(--ink); background: #fff; box-shadow: 0 3px 12px #17261d35; font-family: var(--sans); line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; white-space: normal; transform: translateY(-54px); }
 .map-info::after { position: absolute; bottom: -8px; left: 50%; width: 0; height: 0; border-top: 8px solid #fff; border-right: 8px solid transparent; border-left: 8px solid transparent; content: ''; transform: translateX(-50%); }
