@@ -71,17 +71,16 @@
           <div class="panel-title-row">
             <div>
               <span class="section-kicker">REBALANCING QUEUE</span>
-              <h1>위험도 순위</h1>
+              <h1>대여소 지표</h1>
             </div>
             <button class="text-button export-button" id="exportCsv" type="button" title="현재 필터 결과 CSV 다운로드">
               <span aria-hidden="true">↓</span> CSV
             </button>
           </div>
           <div class="filter-row">
-            <div class="segmented" role="group" aria-label="위험 유형 필터">
-              <button type="button" data-risk="shortage" class="active">부족</button>
-              <button type="button" data-risk="surplus">과잉</button>
-              <button type="button" data-risk="all">전체</button>
+            <div class="segmented" role="group" aria-label="표시 지표">
+              <button type="button" data-metric="flow" class="active" aria-pressed="true">순증감</button>
+              <button type="button" data-metric="volume" aria-pressed="false">이용량</button>
             </div>
             <label class="district-select-wrap">
               <span class="sr-only">자치구 필터</span>
@@ -91,33 +90,38 @@
               <button class="clear-district" id="clearDistrict" type="button" title="자치구 필터 해제" aria-label="자치구 필터 해제" hidden>×</button>
             </label>
           </div>
+          <div class="flow-filter-row" id="flowFilterGroup" role="group" aria-label="순증감 필터">
+            <button type="button" data-flow-filter="all" class="active" aria-pressed="true">전체</button>
+            <button type="button" data-flow-filter="out" aria-pressed="false">감소(−)</button>
+            <button type="button" data-flow-filter="in" aria-pressed="false">증가(+)</button>
+          </div>
           <div class="active-filter" id="activeFilter" hidden></div>
         </section>
 
-        <section class="summary-block" aria-label="시간대별 수급 요약">
+        <section class="summary-block" aria-label="시간대별 순증감 및 이용량 요약">
           <div class="summary-heading">
-            <h2>수급 요약</h2>
+            <h2>지표 요약</h2>
             <span id="summaryScope">서울 전체</span>
           </div>
           <div class="summary-grid">
             <article class="summary-cell" data-summary="now">
               <span class="summary-time">현재</span>
-              <strong class="summary-count">--</strong>
+              <div class="summary-count">--</div>
               <span class="summary-units">집계 중</span>
             </article>
             <article class="summary-cell" data-summary="h1">
               <span class="summary-time">+1h</span>
-              <strong class="summary-count">--</strong>
+              <div class="summary-count">--</div>
               <span class="summary-units">집계 중</span>
             </article>
             <article class="summary-cell" data-summary="h2">
               <span class="summary-time">+2h</span>
-              <strong class="summary-count">--</strong>
+              <div class="summary-count">--</div>
               <span class="summary-units">집계 중</span>
             </article>
             <article class="summary-cell" data-summary="h3">
               <span class="summary-time">+3h</span>
-              <strong class="summary-count">--</strong>
+              <div class="summary-count">--</div>
               <span class="summary-units">집계 중</span>
             </article>
           </div>
@@ -126,6 +130,7 @@
         <section class="risk-table-section">
           <div class="table-toolbar">
             <div class="table-result" id="resultCount">대여소를 불러오는 중</div>
+            <div class="sort-summary" id="sortSummary"></div>
           </div>
           <div class="table-scroll" id="tableScroll">
             <table class="risk-table">

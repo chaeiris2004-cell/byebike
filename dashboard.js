@@ -21,10 +21,12 @@ const state = {
   isLoading: false,
   source: 'live',
   demoForecasts: false,
-  risk: 'shortage',
+  risk: 'all',
+  metric: 'flow',
+  flowFilter: 'all',
   district: '',
   horizon: 'now',
-  sortKey: 'h3',
+  sortKey: 'h1',
   sortDir: 'desc',
   page: 1,
   selectedStationId: '',
@@ -238,6 +240,19 @@ function filteredStations() {
   });
 }
 
+function filteredTableStations() {
+  return filteredStations().filter((station) => {
+    return stationMatchesFlowFilter(station);
+  });
+}
+
+function stationMatchesFlowFilter(station) {
+  if (state.metric !== 'flow' || state.flowFilter === 'all') return true;
+  return ['h1', 'h2', 'h3'].some((key) => state.flowFilter === 'out'
+    ? station.flow[key] < 0
+    : station.flow[key] > 0);
+}
+
 function stationsForSummary() {
   return state.allStations.filter((station) => !state.district || station.gu === state.district);
 }
@@ -264,22 +279,46 @@ function compareStationNames(left, right) {
 }
 
 function sortedRows() {
+  const rows = filteredTableStations();
+  rows.sort((left, right) => {
+    const nameOrder = compareStationNames(left, right);
+    if (state.sortKey === 'stationName') return state.sortDir === 'asc' ? nameOrder : -nameOrder;
+    const metric = state.metric === 'flow' ? 'flow' : 'volume';
+    const leftRaw = left[metric][state.sortKey];
+    const rightRaw = right[metric][state.sortKey];
+    const leftValue = Number.isFinite(leftRaw)
+      && (state.metric !== 'flow' || state.flowFilter === 'all'
+        || (state.flowFilter === 'out' ? leftRaw < 0 : leftRaw > 0))
+      ? state.metric === 'flow' ? Math.abs(leftRaw) : leftRaw
+      : null;
+    const rightValue = Number.isFinite(rightRaw)
+      && (state.metric !== 'flow' || state.flowFilter === 'all'
+        || (state.flowFilter === 'out' ? rightRaw < 0 : rightRaw > 0))
+      ? state.metric === 'flow' ? Math.abs(rightRaw) : rightRaw
+      : null;
+    if ((leftValue === null) !== (rightValue === null)) return leftValue === null ? 1 : -1;
+    if (leftValue === null) return nameOrder;
+    const byUnits = state.sortDir === 'desc' ? rightValue - leftValue : leftValue - rightValue;
+    return byUnits || nameOrder;
+  });
+  return rows;
+}
+
+function sortedCsvRows() {
   const rows = filteredStations();
   rows.sort((left, right) => {
     const nameOrder = compareStationNames(left, right);
     if (state.sortKey === 'stationName') return state.sortDir === 'asc' ? nameOrder : -nameOrder;
     const leftRisk = riskAt(left, state.sortKey);
     const rightRisk = riskAt(right, state.sortKey);
-    const matchesSortRisk = (risk) => state.risk === 'all'
-      ? risk.type === 'shortage' || risk.type === 'surplus'
-      : risk.type === state.risk;
-    const leftHasRisk = matchesSortRisk(leftRisk);
-    const rightHasRisk = matchesSortRisk(rightRisk);
+    const isRiskValue = (risk) => risk.type === 'shortage' || risk.type === 'surplus';
+    const leftHasRisk = isRiskValue(leftRisk);
+    const rightHasRisk = isRiskValue(rightRisk);
     if (leftHasRisk !== rightHasRisk) return leftHasRisk ? -1 : 1;
     if (!leftHasRisk) return nameOrder;
-    const leftUnits = leftRisk.units;
-    const rightUnits = rightRisk.units;
-    const byUnits = state.sortDir === 'desc' ? rightUnits - leftUnits : leftUnits - rightUnits;
+    const byUnits = state.sortDir === 'desc'
+      ? rightRisk.units - leftRisk.units
+      : leftRisk.units - rightRisk.units;
     return byUnits || nameOrder;
   });
   return rows;
@@ -295,6 +334,17 @@ function updateSortHeaders() {
       indicator.classList.toggle('active', active && isCurrentDirection);
     });
   });
+  const sortSummary = document.getElementById('sortSummary');
+  if (!sortSummary) return;
+  if (state.sortKey === 'stationName') {
+    sortSummary.textContent = `정렬: 대여소명 ${state.sortDir === 'asc' ? '가나다순' : '역순'}`;
+    return;
+  }
+  const label = state.sortKey === 'now' ? '현재' : `+${state.sortKey.slice(1)}h`;
+  const measure = state.metric === 'volume'
+    ? '이용량'
+    : state.flowFilter === 'all' ? '순증감 절대값' : state.flowFilter === 'out' ? '감소량' : '증가량';
+  sortSummary.textContent = `정렬: ${label} · ${measure} ${state.sortDir === 'desc' ? '큰 순' : '작은 순'} (단위: 대/시간)`;
 }
 
 function sortBy(key) {
@@ -331,14 +381,6 @@ function renderListForCriteriaChange(render = renderDashboard) {
       container.scrollTop = 0;
     }
   });
-}
-
-function setSelectedRisk(risk) {
-  state.risk = risk;
-  document.querySelectorAll('[data-risk]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.risk === risk);
-  });
-  renderListForCriteriaChange();
 }
 
 function updateDataStatus() {
@@ -392,110 +434,118 @@ function updateFilterSummary() {
   const totalCount = scopeStations.length;
   elements.summaryScope.textContent = state.district || '서울 전체';
   for (const { key } of horizons) {
-    let shortageCount = 0;
-    let shortageUnits = 0;
-    let surplusCount = 0;
-    let surplusUnits = 0;
-    let unknownCount = 0;
-    for (const station of scopeStations) {
-      const risk = riskAt(station, key);
-      if (risk.type === 'shortage') { shortageCount += 1; shortageUnits += risk.units; }
-      else if (risk.type === 'surplus') { surplusCount += 1; surplusUnits += risk.units; }
-      else if (risk.type === 'unknown') unknownCount += 1;
-    }
-
     const cell = document.querySelector(`[data-summary="${key}"]`);
     const count = cell.querySelector('.summary-count');
     const units = cell.querySelector('.summary-units');
     count.replaceChildren();
     units.replaceChildren();
-    const unknownTitle = unknownCount ? `예측 없음 ${unknownCount.toLocaleString('ko-KR')}곳` : '';
-    cell.title = unknownTitle;
-    units.title = unknownTitle;
-    cell.classList.toggle('all', state.risk === 'all');
-
-    const appendCountLine = (target, value, type, unitText = '(곳)') => {
+    cell.classList.toggle('volume-summary', state.metric === 'volume');
+    const appendAmount = (parent, label, value, tone = 'neutral') => {
       const line = document.createElement('span');
-      line.className = `summary-risk-line ${type}`;
-      const amount = textNode('span', value.toLocaleString('ko-KR'));
-      amount.className = 'summary-risk-number';
-      const denominator = textNode('span', `/ ${totalCount.toLocaleString('ko-KR')}`);
-      denominator.className = 'summary-total';
-      const unit = textNode('span', unitText);
-      unit.className = 'summary-unit';
-      line.append(amount, denominator, unit);
-      target.append(line);
+      line.className = `metric-summary-line ${tone}`;
+      if (label) line.append(textNode('span', label));
+      const formatted = !Number.isFinite(value) ? '—'
+        : tone === 'shortage' ? `−${Math.abs(value).toLocaleString('ko-KR')}`
+          : tone === 'surplus' ? `+${Math.abs(value).toLocaleString('ko-KR')}`
+            : value.toLocaleString('ko-KR');
+      const amount = textNode('span', formatted);
+      amount.className = 'metric-summary-number';
+      line.append(amount);
+      line.append(textNode('small', '(대)'));
+      parent.append(line);
+      return line;
+    };
+    const appendCountLine = (label, countValue, tone) => {
+      const line = document.createElement('span');
+      line.className = `metric-summary-line count-line ${tone}`;
+      line.append(
+        textNode('span', label),
+        textNode('strong', countValue.toLocaleString('ko-KR')),
+        textNode('span', `/ ${totalCount.toLocaleString('ko-KR')}`),
+        textNode('small', '(곳)')
+      );
+      count.append(line);
       return line;
     };
 
-    if (state.risk === 'shortage') {
-      appendCountLine(count, shortageCount, 'shortage');
-      const amount = textNode('span', `−${shortageUnits.toLocaleString('ko-KR')}`);
-      amount.className = 'summary-risk-number shortage';
-      const unit = textNode('span', '(대)');
-      unit.className = 'summary-unit';
-      units.append(amount, unit);
-    } else if (state.risk === 'surplus') {
-      appendCountLine(count, surplusCount, 'surplus');
-      const amount = textNode('span', `+${surplusUnits.toLocaleString('ko-KR')}`);
-      amount.className = 'summary-risk-number surplus';
-      const unit = textNode('span', '(대)');
-      unit.className = 'summary-unit';
-      units.append(amount, unit);
+    if (key === 'now') {
+      count.append(textNode('span', '—'));
+      cell.title = '현재 시점의 순증감과 이용량은 제공되지 않습니다.';
+      continue;
+    }
+
+    if (state.metric === 'volume') {
+      const values = scopeStations.map((station) => station.volume[key]).filter(Number.isFinite);
+      const total = values.reduce((sum, value) => sum + value, 0);
+      const average = values.length ? total / values.length : null;
+      appendAmount(count, '합계', total, 'neutral');
+      units.append(
+        textNode('span', '대여소 평균 '),
+        textNode('span', average === null ? '—' : average.toLocaleString('ko-KR', { maximumFractionDigits: 1 })),
+        textNode('small', '(대)')
+      );
+      cell.title = `${values.length.toLocaleString('ko-KR')}개 대여소의 이용량 집계`;
     } else {
-      const shortageLine = appendCountLine(count, shortageCount, 'shortage');
-      const shortageUnitsLabel = document.createElement('span');
-      shortageUnitsLabel.className = 'summary-risk-total shortage';
-      shortageUnitsLabel.append(
-        textNode('span', `−${shortageUnits.toLocaleString('ko-KR')}`),
-        textNode('span', '(대)')
-      );
-      shortageLine.append(shortageUnitsLabel);
-      const surplusLine = appendCountLine(count, surplusCount, 'surplus');
-      const surplusUnitsLabel = document.createElement('span');
-      surplusUnitsLabel.className = 'summary-risk-total surplus';
-      surplusUnitsLabel.append(
-        textNode('span', `+${surplusUnits.toLocaleString('ko-KR')}`),
-        textNode('span', '(대)')
-      );
-      surplusLine.append(surplusUnitsLabel);
+      const flows = scopeStations.map((station) => station.flow[key]).filter(Number.isFinite);
+      const decreases = flows.filter((flow) => flow < 0);
+      const increases = flows.filter((flow) => flow > 0);
+      const decreaseTotal = decreases.reduce((sum, flow) => sum + flow, 0);
+      const increaseTotal = increases.reduce((sum, flow) => sum + flow, 0);
+      const net = flows.reduce((sum, flow) => sum + flow, 0);
+      if (state.flowFilter !== 'in') appendCountLine('감소', decreases.length, 'shortage');
+      if (state.flowFilter !== 'out') appendCountLine('증가', increases.length, 'surplus');
+      if (state.flowFilter === 'out') {
+        appendAmount(units, '합계', decreaseTotal, 'shortage');
+      } else if (state.flowFilter === 'in') {
+        appendAmount(units, '합계', increaseTotal, 'surplus');
+      } else {
+        appendAmount(units, '순합계', net, net < 0 ? 'shortage' : net > 0 ? 'surplus' : 'neutral');
+      }
+      cell.title = `감소 ${decreases.length.toLocaleString('ko-KR')}곳, 증가 ${increases.length.toLocaleString('ko-KR')}곳 · 감소 합계 ${decreaseTotal.toLocaleString('ko-KR')}대 · 증가 합계 ${increaseTotal.toLocaleString('ko-KR')}대`;
     }
   }
 }
 
 function createStockCell(station, horizon) {
-  const risk = riskAt(station, horizon);
   const cell = document.createElement('td');
-  const type = risk.type === 'shortage' || risk.type === 'surplus' ? risk.type : 'normal';
-  const target = Math.ceil(station.rackTotCnt * config.thresholds.targetRate);
-  const overCapacity = Number.isFinite(risk.stock) && risk.stock > station.rackTotCnt;
-  let description = risk.type === 'shortage'
-    ? `현재 ${risk.stock}대 / 전체 거치대 ${station.rackTotCnt}대 · 목표 ${target}대 대비 ${risk.units}대 부족`
-    : risk.type === 'surplus'
-      ? `현재 ${risk.stock}대 / 전체 거치대 ${station.rackTotCnt}대 · 목표 ${target}대 대비 ${risk.units}대 과잉`
-      : risk.type === 'normal' ? '정상 범위' : '예측 없음';
-  if (overCapacity) description += ' · 재고가 거치대 수를 초과했습니다(거치대 외 주차이거나 거치대 수 정보 확인 필요)';
-  cell.title = description;
-  cell.setAttribute('aria-label', description);
+  const flow = station.flow[horizon];
+  const volume = station.volume[horizon];
+  const stock = station.stock[horizon];
+  const direction = horizon === 'h1' ? '현재→1시간 뒤'
+    : horizon === 'h2' ? '1→2시간 뒤'
+      : horizon === 'h3' ? '2→3시간 뒤' : '현재';
+  const formatNumber = (value) => Number.isFinite(value) ? value.toLocaleString('ko-KR') : '—';
+  const overCapacity = Number.isFinite(stock) && stock > station.rackTotCnt;
+  const flowDescription = !Number.isFinite(flow) ? '순증감 예측값 없음'
+    : flow > 0 ? `반납이 대여보다 ${flow.toLocaleString('ko-KR')}대 많을 것으로 예측`
+      : flow < 0 ? `반납이 대여보다 ${Math.abs(flow).toLocaleString('ko-KR')}대 적을 것으로 예측`
+        : '반납과 대여가 같을 것으로 예측';
+  const description = state.metric === 'flow'
+    ? horizon === 'now'
+      ? `현재 순증감은 과거 스냅샷이 없어 제공되지 않습니다 · 예상 재고 ${formatNumber(stock)}대 / 거치대 ${formatNumber(station.rackTotCnt)}대`
+      : `${direction} 동안 ${flowDescription} · 이용량 ${formatNumber(volume)}대 · 예상 재고 ${formatNumber(stock)}대 / 거치대 ${formatNumber(station.rackTotCnt)}대`
+    : `${direction} 이용량 ${formatNumber(volume)}대 · 예상 재고 ${formatNumber(stock)}대 / 거치대 ${formatNumber(station.rackTotCnt)}대`;
+  const fullDescription = overCapacity ? `${description} · 재고가 거치대 수를 초과했습니다` : description;
+  cell.title = fullDescription;
+  cell.setAttribute('aria-label', fullDescription);
 
   const wrapper = document.createElement('div');
   wrapper.className = 'stock-cell';
-  const status = textNode('span', risk.type === 'shortage'
-    ? `부족 −${risk.units.toLocaleString('ko-KR')}`
-    : risk.type === 'surplus'
-      ? `과잉 +${risk.units.toLocaleString('ko-KR')}`
-      : risk.type === 'normal' ? '정상' : '—');
-  status.className = `stock-primary ${type}`;
+  const primaryText = state.metric === 'flow'
+    ? Number.isFinite(flow) ? flow > 0 ? `+${flow.toLocaleString('ko-KR')}` : flow < 0 ? `−${Math.abs(flow).toLocaleString('ko-KR')}` : '0' : '—'
+    : Number.isFinite(volume) ? volume.toLocaleString('ko-KR') : '—';
+  const status = textNode('span', primaryText);
+  status.className = `stock-primary ${state.metric === 'volume' ? 'volume' : flow < 0 ? 'shortage' : flow > 0 ? 'surplus' : 'neutral'}`;
 
   const details = document.createElement('span');
   details.className = 'stock-details';
-  const stock = textNode('span', Number.isFinite(risk.stock) ? risk.stock.toLocaleString('ko-KR') : '—');
-  stock.className = `stock-value ${risk.type === 'shortage' || risk.type === 'surplus' ? risk.type : 'normal'}`;
+  const stockValueNode = textNode('span', Number.isFinite(stock) ? stock.toLocaleString('ko-KR') : '—');
+  stockValueNode.className = 'stock-value';
   const divider = textNode('span', `/ ${station.rackTotCnt.toLocaleString('ko-KR')}`);
   divider.className = 'stock-capacity';
   const unit = textNode('span', '(대)');
   unit.className = 'stock-unit';
-  details.append(stock, divider, unit);
+  details.append(stockValueNode, divider, unit);
   wrapper.append(status, details);
   cell.append(wrapper);
   return cell;
@@ -526,11 +576,15 @@ function centerSelectedRow(stationId, source) {
 
 function selectStation(station, options = {}) {
   const { focusMap = true, openInfo = true, marker: suppliedMarker = null, source = 'map' } = options;
-  if (!stationMatchesRisk(station)) {
-    state.risk = 'all';
-    document.querySelector('[data-risk="all"]').classList.add('active');
-    document.querySelectorAll('[data-risk]:not([data-risk="all"])').forEach((button) => button.classList.remove('active'));
-    showToast('위험 유형 필터를 전체로 바꿔 대여소를 표시했습니다.');
+  state.risk = 'all';
+  if (!stationMatchesFlowFilter(station)) {
+    state.flowFilter = 'all';
+    document.querySelectorAll('[data-flow-filter]').forEach((button) => {
+      const active = button.dataset.flowFilter === 'all';
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+    showToast('순증감 필터를 전체로 바꿔 대여소를 표시했습니다.');
   }
   if (state.district && state.district !== station.gu) {
     state.district = station.gu;
@@ -1053,7 +1107,7 @@ function buildCsv(rows) {
 }
 
 function exportCsv() {
-  const blob = new Blob([buildCsv(sortedRows())], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob([buildCsv(sortedCsvRows())], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -1215,10 +1269,26 @@ function bindControls() {
   elements.clearDistrict.addEventListener('click', () => {
     clearDistrictFilter();
   });
-  document.querySelectorAll('[data-risk]').forEach((button) => {
+  document.querySelectorAll('[data-metric]').forEach((button) => {
     button.addEventListener('click', () => {
-      state.risk = button.dataset.risk;
-      document.querySelectorAll('[data-risk]').forEach((item) => item.classList.toggle('active', item === button));
+      state.metric = button.dataset.metric;
+      document.querySelectorAll('[data-metric]').forEach((item) => {
+        const active = item === button;
+        item.classList.toggle('active', active);
+        item.setAttribute('aria-pressed', String(active));
+      });
+      document.getElementById('flowFilterGroup').hidden = state.metric !== 'flow';
+      renderListForCriteriaChange();
+    });
+  });
+  document.querySelectorAll('[data-flow-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.flowFilter = button.dataset.flowFilter;
+      document.querySelectorAll('[data-flow-filter]').forEach((item) => {
+        const active = item === button;
+        item.classList.toggle('active', active);
+        item.setAttribute('aria-pressed', String(active));
+      });
       renderListForCriteriaChange();
     });
   });
