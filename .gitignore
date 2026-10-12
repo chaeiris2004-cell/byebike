@@ -1,2 +1,7 @@
 .env
+.quota.json
+.quota.json.tmp
 __pycache__/
+poll_test.py
+poll_log.csv
+./venv/

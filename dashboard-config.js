@@ -1,6 +1,6 @@
 window.OPERATOR_CONFIG = Object.freeze({
   apiEndpoint: '/api/stations',
-  refreshIntervalMs: 60000,
+  refreshIntervalMs: 300000,
   pageSize: 75,
   demoForecasts: true,
   thresholds: Object.freeze({

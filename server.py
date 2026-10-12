@@ -2,6 +2,7 @@ import json
 import os
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -12,14 +13,19 @@ from urllib.request import Request, urlopen
 
 BASE_DIR = Path(__file__).resolve().parent
 API_BASE = "http://openapi.seoul.go.kr:8088"
-CACHE_SECONDS = 45
+CACHE_SECONDS = 300
+DAILY_CALL_LIMIT = 800
 DIRECTORY_CACHE_SECONDS = 21600
 PAGE_SIZE = 1000
 SAMPLE_PAGE_SIZE = 5
+QUOTA_FILE = BASE_DIR / ".quota.json"
+KOREA_TIMEZONE = timezone(timedelta(hours=9))
 cache_lock = threading.Lock()
+quota_lock = threading.Lock()
 directory_cache_lock = threading.Lock()
 cached_result = None
 cache_expires_at = 0.0
+cached_stale_reason = None
 cached_directory = None
 directory_cache_expires_at = 0.0
 
@@ -52,7 +58,43 @@ class ApiError(Exception):
     pass
 
 
+class QuotaExceeded(ApiError):
+    pass
+
+
+def reserve_api_call():
+    today = datetime.now(KOREA_TIMEZONE).date().isoformat()
+    with quota_lock:
+        if QUOTA_FILE.exists():
+            try:
+                quota = json.loads(QUOTA_FILE.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise ApiError("서울 API 호출 한도 정보를 읽을 수 없습니다.") from error
+        else:
+            quota = {}
+
+        if not isinstance(quota, dict):
+            raise ApiError("서울 API 호출 한도 정보가 올바르지 않습니다.")
+        count = quota.get("count", 0) if quota.get("date") == today else 0
+        if not isinstance(count, int) or count < 0:
+            raise ApiError("서울 API 호출 한도 정보가 올바르지 않습니다.")
+        if count >= DAILY_CALL_LIMIT:
+            raise QuotaExceeded("일일 서울 API 호출 한도에 도달했습니다.")
+
+        temporary_file = QUOTA_FILE.with_suffix(".json.tmp")
+        try:
+            temporary_file.write_text(
+                json.dumps({"date": today, "count": count + 1}),
+                encoding="utf-8",
+            )
+            temporary_file.replace(QUOTA_FILE)
+        except OSError as error:
+            raise ApiError("서울 API 호출 한도 정보를 저장할 수 없습니다.") from error
+
+
 def fetch_page(api_key, start, end, service="bikeList", response_key="rentBikeStatus"):
+    if api_key != "sample":
+        reserve_api_call()
     encoded_key = quote(api_key, safe="")
     url = f"{API_BASE}/{encoded_key}/json/{service}/{start}/{end}/"
     request = Request(url, headers={"User-Agent": "TtareungyiMap/1.0"})
@@ -214,15 +256,49 @@ def load_stations():
 
 
 def get_stations():
-    global cached_result, cache_expires_at
+    global cached_result, cache_expires_at, cached_stale_reason
     now = time.monotonic()
     with cache_lock:
-        if cached_result is not None and now < cache_expires_at:
-            return cached_result
-        result = load_stations()
+        if now < cache_expires_at:
+            if cached_result is not None:
+                return station_response()
+            raise ApiError("서울 API 재조회 대기 중이며 사용할 캐시가 없습니다.")
+
+        cache_expires_at = now + CACHE_SECONDS
+        try:
+            result = load_stations()
+        except QuotaExceeded:
+            cache_expires_at = time.monotonic() + CACHE_SECONDS
+            if cached_result is None:
+                raise
+            cached_stale_reason = "quota"
+            return station_response()
+        except (ApiError, URLError, TimeoutError, ValueError, OSError):
+            cache_expires_at = time.monotonic() + CACHE_SECONDS
+            if cached_result is None:
+                raise
+            cached_stale_reason = "error"
+            return station_response()
+
         cached_result = result
-        cache_expires_at = time.monotonic() + CACHE_SECONDS
-        return result
+        cached_stale_reason = None
+        cache_expires_at = time.monotonic() + max(
+            0,
+            result["fetchedAt"] + CACHE_SECONDS - time.time(),
+        )
+        return station_response()
+
+
+def station_response():
+    response = dict(cached_result)
+    response["nextFetchAt"] = response["fetchedAt"] + CACHE_SECONDS
+    if cached_stale_reason:
+        response["stale"] = True
+        response["staleReason"] = cached_stale_reason
+    else:
+        response.pop("stale", None)
+        response.pop("staleReason", None)
+    return response
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -240,9 +316,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/stations":
             try:
                 self.send_json(200, get_stations())
-            except (ApiError, URLError, TimeoutError, ValueError) as error:
+            except (ApiError, URLError, TimeoutError, ValueError, OSError) as error:
                 message = str(error) if isinstance(error, ApiError) else "서울 API에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."
-                self.send_json(502, {"error": message})
+                self.send_json(502, {"error": message, "fetchedAt": None, "nextFetchAt": None})
             return
 
         static_files = {

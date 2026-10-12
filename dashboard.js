@@ -1,18 +1,31 @@
 const config = window.OPERATOR_CONFIG;
+const SEOUL_COORDINATE_BOUNDS = Object.freeze({
+  minLat: 37.4,
+  maxLat: 37.75,
+  minLon: 126.7,
+  maxLon: 127.2
+});
 const horizons = [
   { key: 'now', label: '현재' },
   { key: 'h1', label: '+1시간' },
+  { key: 'h2', label: '+2시간' },
   { key: 'h3', label: '+3시간' }
 ];
 const state = {
   allStations: [],
   baseTime: null,
+  fetchedAt: null,
+  nextFetchAt: null,
+  stale: false,
+  staleReason: null,
+  isLoading: false,
   source: 'live',
   demoForecasts: false,
   risk: 'shortage',
   district: '',
   horizon: 'now',
-  sort: 'shortageH3',
+  sortKey: 'h3',
+  sortDir: 'desc',
   page: 1,
   selectedStationId: '',
   suggestions: [],
@@ -32,7 +45,9 @@ const state = {
 const elements = {
   baseTime: document.getElementById('baseTime'),
   dataMode: document.getElementById('dataMode'),
+  dataFreshness: document.getElementById('dataFreshness'),
   refreshButton: document.getElementById('refreshButton'),
+  refreshCountdown: document.getElementById('refreshCountdown'),
   search: document.getElementById('stationSearch'),
   suggestions: document.getElementById('searchSuggestions'),
   districtFilter: document.getElementById('districtFilter'),
@@ -45,7 +60,6 @@ const elements = {
   pageStatus: document.getElementById('pageStatus'),
   previousPage: document.getElementById('previousPage'),
   nextPage: document.getElementById('nextPage'),
-  sortSelect: document.getElementById('sortSelect'),
   exportCsv: document.getElementById('exportCsv'),
   mapTitle: document.getElementById('mapTitle'),
   mapStatus: document.getElementById('mapStatus'),
@@ -77,6 +91,7 @@ function makeDemoForecast(stationId, now, capacity) {
   const laterShift = ((seed >>> 4) % 15) - 7;
   return {
     h1: clampStock(now + firstShift, capacity),
+    h2: clampStock(now + firstShift + laterShift / 2, capacity),
     h3: clampStock(now + firstShift + laterShift, capacity)
   };
 }
@@ -90,12 +105,14 @@ function toDashboardData(payload) {
     const rackTotCnt = Number(raw.rackTotCnt ?? raw.rackCount) || 0;
     const stockNow = stockValue(rawStock.now ?? raw.bikeCount);
     let stockH1 = stockValue(rawStock.h1);
+    let stockH2 = stockValue(rawStock.h2);
     let stockH3 = stockValue(rawStock.h3);
     let generatedForecast = false;
 
-    if (config.demoForecasts && rackTotCnt > 0 && stockNow !== null && (stockH1 === null || stockH3 === null)) {
+    if (config.demoForecasts && rackTotCnt > 0 && stockNow !== null && (stockH1 === null || stockH2 === null || stockH3 === null)) {
       const demo = makeDemoForecast(stationId, stockNow, rackTotCnt);
       if (stockH1 === null) stockH1 = demo.h1;
+      if (stockH2 === null) stockH2 = demo.h2;
       if (stockH3 === null) stockH3 = demo.h3;
       generatedForecast = true;
     }
@@ -107,7 +124,7 @@ function toDashboardData(payload) {
       lat: Number(raw.lat ?? raw.latitude),
       lon: Number(raw.lon ?? raw.longitude),
       rackTotCnt,
-      stock: { now: stockNow, h1: stockH1, h3: stockH3 },
+      stock: { now: stockNow, h1: stockH1, h2: stockH2, h3: stockH3 },
       forecastSource: generatedForecast ? 'demo' : 'model',
       extra: raw.extra || {}
     };
@@ -115,7 +132,13 @@ function toDashboardData(payload) {
 
   return {
     baseTime: payload.baseTime || (payload.fetchedAt ? new Date(payload.fetchedAt * 1000).toISOString() : new Date().toISOString()),
+    fetchedAt: Number.isFinite(payload.fetchedAt) ? payload.fetchedAt : Date.now() / 1000,
+    nextFetchAt: Number.isFinite(payload.nextFetchAt)
+      ? payload.nextFetchAt
+      : (Number.isFinite(payload.fetchedAt) ? payload.fetchedAt : Date.now() / 1000) + config.refreshIntervalMs / 1000,
     source: payload.source || 'live',
+    stale: payload.stale === true,
+    staleReason: payload.staleReason || null,
     stations
   };
 }
@@ -123,10 +146,7 @@ function toDashboardData(payload) {
 function formatTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '시각 정보 없음';
-  return new Intl.DateTimeFormat('ko-KR', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false
-  }).format(date);
+  return new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
 }
 
 function riskAt(station, horizon) {
@@ -185,24 +205,53 @@ function relevantRisk(risk) {
   return risk.type === 'shortage' || risk.type === 'surplus';
 }
 
-function sortValue(station, key) {
-  if (key === 'stationName') return station.stationName;
-  const horizon = key === 'shortageNow' ? 'now' : key === 'shortageH1' ? 'h1' : 'h3';
-  const risk = riskAt(station, horizon);
-  if (key === 'surplusH3') return risk.type === 'surplus' ? risk.units : -1;
-  return risk.type === 'shortage' ? risk.units : -1;
+function compareStationNames(left, right) {
+  return left.stationName.localeCompare(right.stationName, 'ko-KR', { numeric: true });
 }
 
 function sortedRows() {
   const rows = filteredStations();
-  const isNameSort = state.sort === 'stationName';
   rows.sort((left, right) => {
-    const a = sortValue(left, state.sort);
-    const b = sortValue(right, state.sort);
-    if (isNameSort) return String(a).localeCompare(String(b), 'ko-KR');
-    return b - a || left.stationName.localeCompare(right.stationName, 'ko-KR');
+    const nameOrder = compareStationNames(left, right);
+    if (state.sortKey === 'stationName') return state.sortDir === 'asc' ? nameOrder : -nameOrder;
+    const leftRisk = riskAt(left, state.sortKey);
+    const rightRisk = riskAt(right, state.sortKey);
+    const matchesSortRisk = (risk) => state.risk === 'all'
+      ? risk.type === 'shortage' || risk.type === 'surplus'
+      : risk.type === state.risk;
+    const leftHasRisk = matchesSortRisk(leftRisk);
+    const rightHasRisk = matchesSortRisk(rightRisk);
+    if (leftHasRisk !== rightHasRisk) return leftHasRisk ? -1 : 1;
+    if (!leftHasRisk) return nameOrder;
+    const leftUnits = leftRisk.units;
+    const rightUnits = rightRisk.units;
+    const byUnits = state.sortDir === 'desc' ? rightUnits - leftUnits : leftUnits - rightUnits;
+    return byUnits || nameOrder;
   });
   return rows;
+}
+
+function updateSortHeaders() {
+  document.querySelectorAll('[data-sort]').forEach((button) => {
+    const active = button.dataset.sort === state.sortKey;
+    const th = button.closest('th');
+    th.setAttribute('aria-sort', active ? (state.sortDir === 'asc' ? 'ascending' : 'descending') : 'none');
+    button.querySelectorAll('[data-sort-direction]').forEach((indicator) => {
+      const isCurrentDirection = indicator.dataset.sortDirection === state.sortDir;
+      indicator.classList.toggle('active', active && isCurrentDirection);
+    });
+  });
+}
+
+function sortBy(key) {
+  if (state.sortKey === key) {
+    state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.sortKey = key;
+    state.sortDir = key === 'stationName' ? 'asc' : 'desc';
+  }
+  state.page = 1;
+  renderRows();
 }
 
 function setSelectedRisk(risk) {
@@ -220,7 +269,37 @@ function updateDataStatus() {
   elements.dataMode.classList.toggle('demo', demo || state.source === 'sample');
   elements.forecastNote.textContent = demo ? '예측: 데모 시뮬레이션' : '예측: 모델 연동';
   elements.forecastNote.classList.toggle('forecast-note', demo);
-  elements.baseTime.textContent = `${formatTime(state.baseTime)} 기준`;
+  updateDataAge();
+}
+
+function updateDataAge() {
+  if (!Number.isFinite(state.fetchedAt)) return;
+  const ageSeconds = Math.max(0, Math.floor(Date.now() / 1000 - state.fetchedAt));
+  const ageLabel = ageSeconds < 60 ? '방금' : `${Math.floor(ageSeconds / 60)}분 전`;
+  const old = state.stale || ageSeconds > 600;
+  const delayed = !old && ageSeconds > 300;
+  const status = old ? '오래된 데이터' : delayed ? '지연' : '최신';
+  const className = old ? 'old' : delayed ? 'delayed' : 'latest';
+  const explanation = state.staleReason === 'quota' ? '호출 한도 보호'
+    : state.staleReason === 'error' ? '조회 실패' : '';
+  const tooltip = `서울시 원천 데이터는 최대 약 5분 늦게 반영될 수 있습니다.${state.stale && explanation ? ` (${explanation})` : ''}`;
+  elements.baseTime.textContent = `${formatTime(state.fetchedAt * 1000)} 기준 · ${ageLabel}`;
+  elements.baseTime.title = tooltip;
+  elements.dataFreshness.textContent = status;
+  elements.dataFreshness.className = `freshness-chip ${className}`;
+  elements.dataFreshness.title = tooltip;
+}
+
+function updateRefreshButton() {
+  const remaining = Number.isFinite(state.nextFetchAt)
+    ? Math.max(0, Math.ceil(state.nextFetchAt - Date.now() / 1000))
+    : 0;
+  elements.refreshButton.disabled = state.isLoading || remaining > 0;
+  elements.refreshCountdown.textContent = state.isLoading
+    ? '조회 중'
+    : remaining > 0
+      ? `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')} 후 가능`
+      : '새로고침';
 }
 
 function fillDistrictSelect() {
@@ -232,6 +311,7 @@ function fillDistrictSelect() {
 
 function updateFilterSummary() {
   const scopeStations = stationsForSummary();
+  const totalCount = scopeStations.length;
   elements.summaryScope.textContent = state.district || '서울 전체';
   for (const { key } of horizons) {
     let shortageCount = 0;
@@ -249,35 +329,96 @@ function updateFilterSummary() {
     const cell = document.querySelector(`[data-summary="${key}"]`);
     const count = cell.querySelector('.summary-count');
     const units = cell.querySelector('.summary-units');
-    cell.classList.toggle('surplus', state.risk === 'surplus');
+    count.replaceChildren();
+    units.replaceChildren();
+    const unknownTitle = unknownCount ? `예측 없음 ${unknownCount.toLocaleString('ko-KR')}곳` : '';
+    cell.title = unknownTitle;
+    units.title = unknownTitle;
     cell.classList.toggle('all', state.risk === 'all');
+
+    const appendCountLine = (target, value, type, unitText = '(곳)') => {
+      const line = document.createElement('span');
+      line.className = `summary-risk-line ${type}`;
+      const amount = textNode('span', value.toLocaleString('ko-KR'));
+      amount.className = 'summary-risk-number';
+      const denominator = textNode('span', `/ ${totalCount.toLocaleString('ko-KR')}`);
+      denominator.className = 'summary-total';
+      const unit = textNode('span', unitText);
+      unit.className = 'summary-unit';
+      line.append(amount, denominator, unit);
+      target.append(line);
+      return line;
+    };
+
     if (state.risk === 'shortage') {
-      count.textContent = `${shortageCount.toLocaleString('ko-KR')}곳`;
-      units.textContent = `부족 −${shortageUnits.toLocaleString('ko-KR')}대`;
+      appendCountLine(count, shortageCount, 'shortage');
+      const amount = textNode('span', `−${shortageUnits.toLocaleString('ko-KR')}`);
+      amount.className = 'summary-risk-number shortage';
+      const unit = textNode('span', '(대)');
+      unit.className = 'summary-unit';
+      units.append(amount, unit);
     } else if (state.risk === 'surplus') {
-      count.textContent = `${surplusCount.toLocaleString('ko-KR')}곳`;
-      units.textContent = `과잉 +${surplusUnits.toLocaleString('ko-KR')}대`;
+      appendCountLine(count, surplusCount, 'surplus');
+      const amount = textNode('span', `+${surplusUnits.toLocaleString('ko-KR')}`);
+      amount.className = 'summary-risk-number surplus';
+      const unit = textNode('span', '(대)');
+      unit.className = 'summary-unit';
+      units.append(amount, unit);
     } else {
-      count.textContent = `${shortageCount.toLocaleString('ko-KR')} / ${surplusCount.toLocaleString('ko-KR')}`;
-      units.textContent = `부족 ${shortageUnits.toLocaleString('ko-KR')}대 · 과잉 ${surplusUnits.toLocaleString('ko-KR')}대`;
+      const shortageLine = appendCountLine(count, shortageCount, 'shortage');
+      const shortageUnitsLabel = document.createElement('span');
+      shortageUnitsLabel.className = 'summary-risk-total shortage';
+      shortageUnitsLabel.append(
+        textNode('span', `−${shortageUnits.toLocaleString('ko-KR')}`),
+        textNode('span', '(대)')
+      );
+      shortageLine.append(shortageUnitsLabel);
+      const surplusLine = appendCountLine(count, surplusCount, 'surplus');
+      const surplusUnitsLabel = document.createElement('span');
+      surplusUnitsLabel.className = 'summary-risk-total surplus';
+      surplusUnitsLabel.append(
+        textNode('span', `+${surplusUnits.toLocaleString('ko-KR')}`),
+        textNode('span', '(대)')
+      );
+      surplusLine.append(surplusUnitsLabel);
     }
-    if (unknownCount && state.risk === 'all') units.title = `예측 없음 ${unknownCount.toLocaleString('ko-KR')}곳`;
   }
 }
 
 function createStockCell(station, horizon) {
   const risk = riskAt(station, horizon);
   const cell = document.createElement('td');
-  if (risk.type === 'shortage') cell.className = 'cell-shortage';
-  if (risk.type === 'surplus') cell.className = 'cell-surplus';
+  const type = risk.type === 'shortage' || risk.type === 'surplus' ? risk.type : 'normal';
+  const target = Math.ceil(station.rackTotCnt * config.thresholds.targetRate);
+  const overCapacity = Number.isFinite(risk.stock) && risk.stock > station.rackTotCnt;
+  let description = risk.type === 'shortage'
+    ? `현재 ${risk.stock}대 / 전체 거치대 ${station.rackTotCnt}대 · 목표 ${target}대 대비 ${risk.units}대 부족`
+    : risk.type === 'surplus'
+      ? `현재 ${risk.stock}대 / 전체 거치대 ${station.rackTotCnt}대 · 목표 ${target}대 대비 ${risk.units}대 과잉`
+      : risk.type === 'normal' ? '정상 범위' : '예측 없음';
+  if (overCapacity) description += ' · 재고가 거치대 수를 초과했습니다(거치대 외 주차이거나 거치대 수 정보 확인 필요)';
+  cell.title = description;
+  cell.setAttribute('aria-label', description);
+
   const wrapper = document.createElement('div');
   wrapper.className = 'stock-cell';
-  const stock = document.createElement('span');
-  stock.textContent = risk.stock === null ? '—' : `${risk.stock}대`;
-  const status = document.createElement('span');
-  status.className = `status ${statusClass(risk)}`;
-  status.textContent = statusText(risk, state.risk);
-  wrapper.append(stock, status);
+  const status = textNode('span', risk.type === 'shortage'
+    ? `부족 −${risk.units.toLocaleString('ko-KR')}`
+    : risk.type === 'surplus'
+      ? `과잉 +${risk.units.toLocaleString('ko-KR')}`
+      : risk.type === 'normal' ? '정상' : '—');
+  status.className = `stock-primary ${type}`;
+
+  const details = document.createElement('span');
+  details.className = 'stock-details';
+  const stock = textNode('span', Number.isFinite(risk.stock) ? risk.stock.toLocaleString('ko-KR') : '—');
+  stock.className = `stock-value ${risk.type === 'shortage' || risk.type === 'surplus' ? risk.type : 'normal'}`;
+  const divider = textNode('span', `/ ${station.rackTotCnt.toLocaleString('ko-KR')}`);
+  divider.className = 'stock-capacity';
+  const unit = textNode('span', '(대)');
+  unit.className = 'stock-unit';
+  details.append(stock, divider, unit);
+  wrapper.append(status, details);
   cell.append(wrapper);
   return cell;
 }
@@ -338,7 +479,7 @@ function renderSelectedStation(station) {
     closeButton,
     textNode('strong', station.stationName),
     textNode('span', `${station.gu} · ${station.rackTotCnt} 거치대`),
-    textNode('span', `현재 ${formatStock(station.stock.now)} · +1h ${formatStock(station.stock.h1)} · +3h ${formatStock(station.stock.h3)}`)
+    textNode('span', `현재 ${formatStock(station.stock.now)} · +1h ${formatStock(station.stock.h1)} · +2h ${formatStock(station.stock.h2)} · +3h ${formatStock(station.stock.h3)}`)
   );
   return content;
 }
@@ -376,7 +517,24 @@ function clearSelection() {
   elements.riskRows.querySelectorAll('.selected').forEach((row) => row.classList.remove('selected'));
 }
 
+function clearDistrictFilter() {
+  state.district = '';
+  elements.districtFilter.value = '';
+  state.page = 1;
+  elements.mapTitle.textContent = '서울 전체';
+  renderDashboard();
+}
+
+function handleEmptyMapClick() {
+  if (state.selectedStationId) {
+    clearSelection();
+    return;
+  }
+  if (mapStage() === 'district' && state.district) clearDistrictFilter();
+}
+
 function renderRows() {
+  updateSortHeaders();
   const rows = sortedRows();
   const totalPages = Math.max(1, Math.ceil(rows.length / config.pageSize));
   state.page = Math.min(state.page, totalPages);
@@ -658,11 +816,20 @@ function refreshPointVisibility() {
 }
 
 function focusDistrict(district) {
-  const stations = state.allStations.filter((station) => station.gu === district);
+  const stations = state.allStations.filter((station) => station.gu === district
+    && station.lat >= SEOUL_COORDINATE_BOUNDS.minLat
+    && station.lat <= SEOUL_COORDINATE_BOUNDS.maxLat
+    && station.lon >= SEOUL_COORDINATE_BOUNDS.minLon
+    && station.lon <= SEOUL_COORDINATE_BOUNDS.maxLon);
   if (!stations.length) return;
   const bounds = new kakao.maps.LatLngBounds();
   stations.forEach((station) => bounds.extend(new kakao.maps.LatLng(station.lat, station.lon)));
   state.map.setBounds(bounds, 70, 60, 70, 60);
+  if (state.map.getLevel() >= config.map.districtBubbleLevel) {
+    state.map.setLevel(config.map.clusterLevel, { animate: true });
+  } else {
+    state.map.panTo(bounds.getCenter());
+  }
   document.getElementById('mapTitle').textContent = district;
 }
 
@@ -770,6 +937,7 @@ function buildCsv(rows) {
   const columns = [
     ['stationId', '대여소ID'], ['stationName', '대여소명'], ['gu', '자치구'], ['rackTotCnt', '거치대수'],
     ['now', '현재재고'], ['nowRisk', '현재위험'], ['h1', '+1시간재고'], ['h1Risk', '+1시간위험'],
+    ['h2', '+2시간재고'], ['h2Risk', '+2시간위험'],
     ['h3', '+3시간재고'], ['h3Risk', '+3시간위험'], ['lat', '위도'], ['lon', '경도']
   ];
   const escape = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
@@ -779,6 +947,7 @@ function buildCsv(rows) {
       stationId: station.stationId, stationName: station.stationName, gu: station.gu, rackTotCnt: station.rackTotCnt,
       now: station.stock.now, nowRisk: statusText(riskAt(station, 'now'), state.risk),
       h1: station.stock.h1, h1Risk: statusText(riskAt(station, 'h1'), state.risk),
+      h2: station.stock.h2, h2Risk: statusText(riskAt(station, 'h2'), state.risk),
       h3: station.stock.h3, h3Risk: statusText(riskAt(station, 'h3'), state.risk), lat: station.lat, lon: station.lon
     };
     lines.push(columns.map(([key]) => escape(record[key])).join(','));
@@ -837,7 +1006,10 @@ function showToast(message) {
 }
 
 async function loadData() {
-  elements.refreshButton.disabled = true;
+  if (state.isLoading) return;
+  if (Number.isFinite(state.nextFetchAt) && Date.now() / 1000 < state.nextFetchAt) return;
+  state.isLoading = true;
+  updateRefreshButton();
   elements.refreshButton.classList.add('loading');
   try {
     const response = await fetch(config.apiEndpoint, { cache: 'no-store' });
@@ -846,9 +1018,14 @@ async function loadData() {
     const dashboardData = toDashboardData(payload);
     state.allStations = dashboardData.stations;
     state.baseTime = dashboardData.baseTime;
+    state.fetchedAt = dashboardData.fetchedAt;
+    state.nextFetchAt = dashboardData.nextFetchAt;
     state.source = dashboardData.source;
+    state.stale = dashboardData.stale;
+    state.staleReason = dashboardData.staleReason;
     state.demoForecasts = config.demoForecasts && state.allStations.some((station) => station.forecastSource === 'demo');
     fillDistrictSelect();
+    elements.districtFilter.value = state.district;
     updateDataStatus();
     renderDashboard();
     if (state.map && state.allStations.length) {
@@ -858,18 +1035,28 @@ async function loadData() {
       document.getElementById('mapTitle').textContent = '서울 전체';
     }
     elements.mapStatus.textContent = `${state.allStations.length.toLocaleString('ko-KR')}개 대여소 데이터`;
-  } catch (error) {
-    elements.dataMode.textContent = '연결 오류';
-    elements.dataMode.classList.add('demo');
-    elements.baseTime.textContent = '기준 시각 없음';
-    elements.riskRows.replaceChildren();
-    elements.resultCount.textContent = '데이터를 불러오지 못했습니다';
-    elements.tableEmpty.textContent = error.message;
-    elements.tableEmpty.hidden = false;
-    elements.mapStatus.textContent = '데이터를 불러오지 못했습니다';
+    if (state.staleReason === 'error') showToast('갱신 실패');
+  } catch {
+    state.stale = true;
+    state.staleReason = 'error';
+    if (state.allStations.length) {
+      updateDataAge();
+    } else {
+      elements.dataMode.textContent = '연결 오류';
+      elements.dataMode.classList.add('demo');
+      elements.dataFreshness.textContent = '오래된 데이터';
+      elements.dataFreshness.className = 'freshness-chip old';
+      elements.dataFreshness.title = '서울시 원천 데이터는 최대 약 5분 늦게 반영될 수 있습니다. (조회 실패)';
+      elements.resultCount.textContent = '데이터를 불러오지 못했습니다';
+      elements.tableEmpty.textContent = '대여소 데이터를 불러오지 못했습니다.';
+      elements.tableEmpty.hidden = false;
+      elements.mapStatus.textContent = '데이터를 불러오지 못했습니다';
+    }
+    showToast('갱신 실패');
   } finally {
-    elements.refreshButton.disabled = false;
+    state.isLoading = false;
     elements.refreshButton.classList.remove('loading');
+    updateRefreshButton();
   }
 }
 
@@ -908,7 +1095,7 @@ function setupMap() {
     zIndex: 11,
     clickable: true
   });
-  kakao.maps.event.addListener(state.map, 'click', clearSelection);
+  kakao.maps.event.addListener(state.map, 'click', handleEmptyMapClick);
   kakao.maps.event.addListener(state.map, 'zoom_changed', renderMapLayers);
   kakao.maps.event.addListener(state.map, 'idle', refreshPointVisibility);
   window.addEventListener('resize', () => state.map.relayout());
@@ -927,10 +1114,7 @@ function bindControls() {
     if (state.district) focusDistrict(state.district);
   });
   elements.clearDistrict.addEventListener('click', () => {
-    state.district = '';
-    elements.districtFilter.value = '';
-    state.page = 1;
-    renderDashboard();
+    clearDistrictFilter();
   });
   document.querySelectorAll('[data-risk]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -950,18 +1134,8 @@ function bindControls() {
       renderMapLayers();
     });
   });
-  elements.sortSelect.addEventListener('change', () => {
-    state.sort = elements.sortSelect.value;
-    state.page = 1;
-    renderRows();
-  });
   document.querySelectorAll('[data-sort]').forEach((button) => {
-    button.addEventListener('click', () => {
-      state.sort = button.dataset.sort === 'now' ? 'shortageNow' : button.dataset.sort === 'h1' ? 'shortageH1' : 'shortageH3';
-      elements.sortSelect.value = state.sort;
-      state.page = 1;
-      renderRows();
-    });
+    button.addEventListener('click', () => sortBy(button.dataset.sort));
   });
   elements.previousPage.addEventListener('click', () => { state.page -= 1; renderRows(); });
   elements.nextPage.addEventListener('click', () => { state.page += 1; renderRows(); });
@@ -996,8 +1170,16 @@ function boot() {
   setupMap();
   loadData();
   window.setInterval(() => {
-    if (!document.hidden) loadData();
+    if (document.visibilityState !== 'hidden') loadData();
   }, config.refreshIntervalMs);
+  window.setInterval(updateDataAge, 30000);
+  window.setInterval(updateRefreshButton, 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden' && Number.isFinite(state.fetchedAt)
+      && Date.now() / 1000 - state.fetchedAt > 300) {
+      loadData();
+    }
+  });
 }
 
 if (window.kakao && window.kakao.maps) {

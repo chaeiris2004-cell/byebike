@@ -25,8 +25,10 @@
       <div class="topbar-meta">
         <span class="data-mode" id="dataMode">연결 중</span>
         <span class="base-time" id="baseTime">기준 시각 확인 중</span>
-        <button class="icon-button" id="refreshButton" type="button" title="데이터 새로고침" aria-label="데이터 새로고침">
+        <span class="freshness-chip" id="dataFreshness" title="서울시 원천 데이터는 최대 약 5분 늦게 반영될 수 있습니다.">데이터 상태 확인 중</span>
+        <button class="icon-button refresh-button" id="refreshButton" type="button" title="데이터 새로고침" aria-label="데이터 새로고침">
           <span aria-hidden="true">↻</span>
+          <span class="refresh-countdown" id="refreshCountdown">새로고침</span>
         </button>
       </div>
       <div class="search-wrap" id="searchWrap">
@@ -48,8 +50,9 @@
           </div>
           <div class="map-period" role="group" aria-label="지도 위험도 기준 시간">
             <button type="button" data-horizon="now" class="active">현재</button>
-            <button type="button" data-horizon="h1">+1시간</button>
-            <button type="button" data-horizon="h3">+3시간</button>
+            <button type="button" data-horizon="h1">+1h</button>
+            <button type="button" data-horizon="h2">+2h</button>
+            <button type="button" data-horizon="h3">+3h</button>
           </div>
         </div>
         <div id="map" aria-label="카카오 지도"></div>
@@ -103,12 +106,17 @@
               <span class="summary-units">집계 중</span>
             </article>
             <article class="summary-cell" data-summary="h1">
-              <span class="summary-time">+1시간</span>
+              <span class="summary-time">+1h</span>
+              <strong class="summary-count">--</strong>
+              <span class="summary-units">집계 중</span>
+            </article>
+            <article class="summary-cell" data-summary="h2">
+              <span class="summary-time">+2h</span>
               <strong class="summary-count">--</strong>
               <span class="summary-units">집계 중</span>
             </article>
             <article class="summary-cell" data-summary="h3">
-              <span class="summary-time">+3시간</span>
+              <span class="summary-time">+3h</span>
               <strong class="summary-count">--</strong>
               <span class="summary-units">집계 중</span>
             </article>
@@ -118,24 +126,16 @@
         <section class="risk-table-section">
           <div class="table-toolbar">
             <div class="table-result" id="resultCount">대여소를 불러오는 중</div>
-            <label class="sort-select-wrap">
-              <span class="sr-only">위험도 정렬</span>
-              <select id="sortSelect" aria-label="위험도 정렬">
-                <option value="shortageH3">+3시간 부족 대수순</option>
-                <option value="shortageNow">현재 부족 대수순</option>
-                <option value="surplusH3">+3시간 과잉 대수순</option>
-                <option value="stationName">대여소명순</option>
-              </select>
-            </label>
           </div>
           <div class="table-scroll" id="tableScroll">
             <table class="risk-table">
               <thead>
                 <tr>
-                  <th scope="col" class="station-column">대여소</th>
-                  <th scope="col"><button type="button" data-sort="now">현재</button></th>
-                  <th scope="col"><button type="button" data-sort="h1">+1시간</button></th>
-                  <th scope="col"><button type="button" data-sort="h3">+3시간</button></th>
+                  <th scope="col" class="station-column" aria-sort="none"><button type="button" data-sort="stationName">대여소<span class="sort-indicators" aria-hidden="true"><span data-sort-direction="asc">▲</span><span data-sort-direction="desc">▼</span></span></button></th>
+                  <th scope="col" aria-sort="none"><button type="button" data-sort="now">현재<span class="sort-indicators" aria-hidden="true"><span data-sort-direction="asc">▲</span><span data-sort-direction="desc">▼</span></span></button></th>
+                  <th scope="col" aria-sort="none"><button type="button" data-sort="h1">+1h<span class="sort-indicators" aria-hidden="true"><span data-sort-direction="asc">▲</span><span data-sort-direction="desc">▼</span></span></button></th>
+                  <th scope="col" aria-sort="none"><button type="button" data-sort="h2">+2h<span class="sort-indicators" aria-hidden="true"><span data-sort-direction="asc">▲</span><span data-sort-direction="desc">▼</span></span></button></th>
+                  <th scope="col" aria-sort="none"><button type="button" data-sort="h3">+3h<span class="sort-indicators" aria-hidden="true"><span data-sort-direction="asc">▲</span><span data-sort-direction="desc">▼</span></span></button></th>
                 </tr>
               </thead>
               <tbody id="riskRows"></tbody>
