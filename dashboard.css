@@ -172,13 +172,13 @@ kbd { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #e1e5e1; border-radius
 .panel-footer { display: flex; flex: 0 0 auto; justify-content: space-between; gap: 8px; padding: 8px 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; }
 .forecast-note { color: #946a1f; }
 
-.district-bubble { --bubble-color: #55645b; display: flex; min-width: 82px; min-height: 58px; flex-direction: column; align-items: center; justify-content: center; padding: 7px 10px; border: 0; border-radius: 999px; color: #fff; background: color-mix(in srgb, var(--bubble-color) var(--intensity, 100%), #fff); box-shadow: 0 3px 10px #17261d35; cursor: pointer; transform: translateY(-50%); }
+.district-bubble { --bubble-color: var(--normal); display: flex; min-width: 82px; min-height: 58px; flex-direction: column; align-items: center; justify-content: center; padding: 7px 10px; border: 0; border-radius: 999px; color: var(--ink); background: color-mix(in srgb, var(--bubble-color) var(--intensity, 25%), transparent); box-shadow: 0 3px 10px #17261d35; cursor: pointer; transform: translateY(-50%); }
 .district-bubble.shortage { --bubble-color: #b94335; }
 .district-bubble.surplus { --bubble-color: #2768a6; }
 .district-bubble.normal { --bubble-color: #55645b; }
 .district-bubble.light { color: #25332b; }
 .district-bubble strong { font-size: 10px; }
-.district-bubble span { margin-top: 2px; font-family: var(--mono); font-size: 8px; white-space: nowrap; }
+.district-bubble span { margin-top: 2px; font-family: var(--mono); font-size: 8px; white-space: normal; }
 .district-legend { position: absolute; z-index: 6; bottom: 14px; left: 14px; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #d9dfdb; border-radius: 6px; color: #344239; background: #ffffffed; box-shadow: 0 2px 8px #17261d1a; font-size: 10px; pointer-events: none; }
 .district-legend[hidden] { display: none; }
 .district-legend-bar { width: 72px; height: 8px; border-radius: 999px; background: linear-gradient(90deg, #f0f2f1, var(--legend-color, #55645b)); }

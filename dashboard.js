@@ -25,7 +25,7 @@ const state = {
   metric: 'flow',
   flowFilter: 'all',
   district: '',
-  horizon: 'now',
+  horizon: 'h1',
   sortKey: 'h1',
   sortDir: 'desc',
   page: 1,
@@ -37,6 +37,7 @@ const state = {
   infoOverlay: null,
   districtLegend: null,
   districtLegendMaximum: null,
+  mapMetricMaximum: 0,
   markers: new Map(),
   districtOverlays: [],
   mapStage: '',
@@ -576,16 +577,6 @@ function centerSelectedRow(stationId, source) {
 
 function selectStation(station, options = {}) {
   const { focusMap = true, openInfo = true, marker: suppliedMarker = null, source = 'map' } = options;
-  state.risk = 'all';
-  if (!stationMatchesFlowFilter(station)) {
-    state.flowFilter = 'all';
-    document.querySelectorAll('[data-flow-filter]').forEach((button) => {
-      const active = button.dataset.flowFilter === 'all';
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-pressed', String(active));
-    });
-    showToast('순증감 필터를 전체로 바꿔 대여소를 표시했습니다.');
-  }
   if (state.district && state.district !== station.gu) {
     state.district = station.gu;
     elements.districtFilter.value = station.gu;
@@ -734,6 +725,26 @@ function renderDashboard(options = {}) {
   if (state.map) renderMapLayers();
 }
 
+function syncHorizonControls() {
+  if (state.horizon === 'now') state.horizon = 'h1';
+  document.querySelectorAll('[data-horizon]').forEach((button) => {
+    const unavailable = button.dataset.horizon === 'now';
+    button.disabled = unavailable;
+    button.title = unavailable ? '실측 이력 축적 후 제공' : '';
+    button.classList.toggle('active', button.dataset.horizon === state.horizon);
+  });
+}
+
+function syncMetricControls() {
+  document.querySelectorAll('[data-metric]').forEach((button) => {
+    const active = button.dataset.metric === state.metric;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  const flowFilterGroup = document.getElementById('flowFilterGroup');
+  if (flowFilterGroup) flowFilterGroup.hidden = state.metric !== 'flow';
+}
+
 function updateActiveFilter() {
   elements.clearDistrict.hidden = !state.district;
   elements.activeFilter.hidden = !state.district;
@@ -765,45 +776,56 @@ function stationGroups(stations) {
   return groups;
 }
 
-function districtRisk(stations) {
-  const shortage = stations.reduce((sum, station) => sum + Number(riskAt(station, state.horizon).type === 'shortage'), 0);
-  const surplus = stations.reduce((sum, station) => sum + Number(riskAt(station, state.horizon).type === 'surplus'), 0);
-  const shortageUnits = stations.reduce((sum, station) => {
-    const risk = riskAt(station, state.horizon);
-    return sum + (risk.type === 'shortage' ? risk.units : 0);
-  }, 0);
-  const surplusUnits = stations.reduce((sum, station) => {
-    const risk = riskAt(station, state.horizon);
-    return sum + (risk.type === 'surplus' ? risk.units : 0);
-  }, 0);
-  const selectedCount = state.risk === 'surplus' ? surplus : state.risk === 'all' ? shortage + surplus : shortage;
-  const selectedUnits = state.risk === 'surplus' ? surplusUnits : state.risk === 'all' ? shortageUnits + surplusUnits : shortageUnits;
-  const total = stations.length;
-  const shortageRatio = total ? shortage / total : 0;
-  const surplusRatio = total ? surplus / total : 0;
-  const ratio = state.risk === 'surplus' ? surplusRatio
-    : state.risk === 'all' ? Math.max(shortageRatio, surplusRatio) : shortageRatio;
-  const color = state.risk === 'surplus' ? 'surplus'
-    : state.risk === 'all' ? shortage > surplus ? 'shortage' : surplus > shortage ? 'surplus' : 'normal'
-      : 'shortage';
-  return { shortage, surplus, shortageUnits, surplusUnits, selectedCount, selectedUnits, shortageRatio, surplusRatio, ratio, color };
+function mapMetricValue(station) {
+  return state.metric === 'flow' ? station.flow[state.horizon] : station.volume[state.horizon];
 }
 
-function makeDistrictBubble(district, stations, intensity) {
-  const metrics = districtRisk(stations);
+function districtRisk(stations) {
+  const validStations = stations.filter((station) => Number.isFinite(mapMetricValue(station)));
+  if (state.metric === 'volume') {
+    return {
+      total: validStations.length,
+      amount: validStations.reduce((sum, station) => sum + mapMetricValue(station), 0),
+      color: 'volume',
+      dominantRatio: 0
+    };
+  }
+  const decreaseCount = validStations.filter((station) => mapMetricValue(station) < 0).length;
+  const increaseCount = validStations.filter((station) => mapMetricValue(station) > 0).length;
+  const total = validStations.length;
+  const dominantRatio = total ? Math.max(decreaseCount, increaseCount) / total : 0;
+  return {
+    total,
+    decreaseCount,
+    increaseCount,
+    amount: validStations.reduce((sum, station) => sum + Math.abs(mapMetricValue(station)), 0),
+    color: decreaseCount > increaseCount ? 'shortage'
+      : increaseCount > decreaseCount ? 'surplus' : 'normal',
+    dominantRatio
+  };
+}
+
+function makeDistrictBubble(district, stations, metrics, diameter, intensity) {
   const content = document.createElement('button');
   content.type = 'button';
-  content.className = `district-bubble ${metrics.color}${intensity < 0.5 ? ' light' : ''}`;
+  content.className = `district-bubble ${metrics.color}`;
+  content.style.setProperty('--bubble-color', metrics.color === 'shortage'
+    ? 'var(--shortage)'
+    : metrics.color === 'surplus' ? 'var(--surplus)'
+      : metrics.color === 'volume' ? 'var(--ink)' : 'var(--normal)');
   content.style.setProperty('--intensity', `${intensity * 100}%`);
-  content.style.width = `${Math.min(142, 82 + metrics.selectedCount * 1.4)}px`;
-  content.style.minHeight = `${Math.min(82, 58 + metrics.selectedCount * 0.35)}px`;
+  content.style.width = `${diameter}px`;
+  content.style.height = `${diameter}px`;
+  content.style.minWidth = `${diameter}px`;
+  content.style.minHeight = `${diameter}px`;
+  content.style.color = 'var(--ink)';
+  content.style.whiteSpace = 'normal';
   content.append(textNode('strong', district));
-  const subline = state.risk === 'surplus'
-    ? `과잉 ${metrics.surplus}곳 (${Math.round(metrics.surplusRatio * 100)}%) / +${metrics.surplusUnits}대`
-    : state.risk === 'all'
-      ? `부족 ${metrics.shortage} (${Math.round(metrics.shortageRatio * 100)}%) · 과잉 ${metrics.surplus} (${Math.round(metrics.surplusRatio * 100)}%)`
-      : `부족 ${metrics.shortage}곳 (${Math.round(metrics.shortageRatio * 100)}%) / −${metrics.shortageUnits}대`;
+  const subline = `${metrics.amount.toLocaleString('ko-KR')} (대)`;
   content.append(textNode('span', subline));
+  content.title = state.metric === 'flow'
+    ? `감소 ${metrics.decreaseCount} / 증가 ${metrics.increaseCount} (곳) · 절댓값 합 ${metrics.amount.toLocaleString('ko-KR')} (대)`
+    : `이용량 합 ${metrics.amount.toLocaleString('ko-KR')} (대) · 대여소 ${metrics.total}곳`;
   content.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -836,12 +858,26 @@ function mapStage() {
 }
 
 function markerImageFor(station) {
-  const risk = riskAt(station, state.horizon);
-  const color = risk.type === 'shortage' ? '#c74735' : risk.type === 'surplus' ? '#2768a6' : '#52655a';
+  const metric = mapMetricValue(station);
   const selected = station.stationId === state.selectedStationId;
-  const width = selected ? 42 : 28;
-  const height = selected ? 54 : 36;
-  const anchor = selected ? 21 : 14;
+  const markerBaseSize = config.map.markerImageSize;
+  const ratio = Number.isFinite(metric) && state.mapMetricMaximum > 0
+    ? Math.abs(metric) / state.mapMetricMaximum
+    : 0;
+  const regularSize = !Number.isFinite(metric) || ratio < config.map.markerSmallRatio
+    ? markerBaseSize + config.map.markerSmallSizeOffset
+    : ratio < config.map.markerMediumRatio
+      ? markerBaseSize
+      : markerBaseSize + config.map.markerLargeSizeOffset;
+  const width = selected ? markerBaseSize * 1.5 : regularSize;
+  const height = selected ? Math.round(markerBaseSize * 54 / 28) : Math.round(regularSize * 36 / 28);
+  const anchor = Math.round(width / 2);
+  const palette = getComputedStyle(document.documentElement);
+  const color = state.metric === 'volume'
+    ? palette.getPropertyValue('--ink').trim()
+    : !Number.isFinite(metric) || metric === 0
+      ? palette.getPropertyValue('--normal').trim()
+      : palette.getPropertyValue(metric < 0 ? '--shortage' : '--surplus').trim();
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 28 36"><path d="M14 1C6.82 1 1 6.82 1 14c0 9.5 13 21 13 21s13-11.5 13-21C27 6.82 21.18 1 14 1Z" fill="${color}" stroke="white" stroke-width="2"/><circle cx="14" cy="14" r="4" fill="white"/></svg>`;
   return new kakao.maps.MarkerImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, new kakao.maps.Size(width, height), {
     offset: new kakao.maps.Point(anchor, height)
@@ -908,10 +944,27 @@ function updateVisibleStationMarkers(stations = currentMapStations()) {
   return visible;
 }
 
+function mapMetricMaximumForStage(stations, stage) {
+  let candidates = stations;
+  if (stage === 'station') {
+    const bounds = state.map.getBounds();
+    const southWest = bounds.getSouthWest();
+    const northEast = bounds.getNorthEast();
+    candidates = stations.filter((station) =>
+      station.lat >= southWest.getLat() - 0.012 && station.lat <= northEast.getLat() + 0.012
+      && station.lon >= southWest.getLng() - 0.018 && station.lon <= northEast.getLng() + 0.018);
+  }
+  return candidates.reduce((maximum, station) => {
+    const value = mapMetricValue(station);
+    return Number.isFinite(value) ? Math.max(maximum, Math.abs(value)) : maximum;
+  }, 0);
+}
+
 function renderMapLayers() {
   if (!state.map || !state.clusterer) return;
   const stage = mapStage();
   const stations = currentMapStations();
+  state.mapMetricMaximum = mapMetricMaximumForStage(stations, stage);
   const selectedStation = state.allStations.find((station) => station.stationId === state.selectedStationId);
   if (state.districtLegend) state.districtLegend.hidden = stage !== 'district';
   removeDistrictOverlays();
@@ -932,18 +985,33 @@ function renderMapLayers() {
     const displayDistricts = [...stationGroups(stations).keys()];
     const allGroups = stationGroups(state.allStations);
     const groups = displayDistricts.map((district) => [district, allGroups.get(district) || []]);
-    const maxRatio = Math.max(0, ...groups.map(([, group]) => districtRisk(group).ratio));
+    const districtMetrics = groups.map(([district, group]) => ({
+      district,
+      group,
+      metrics: districtRisk(group)
+    }));
+    const maxAmount = Math.max(0, ...districtMetrics.map(({ metrics }) => metrics.amount));
+    const maxDominantRatio = Math.max(0, ...districtMetrics.map(({ metrics }) => metrics.dominantRatio));
+    const maxRatio = maxDominantRatio;
     if (state.districtLegend) {
       state.districtLegend.className = `district-legend ${state.risk}`;
       state.districtLegendMaximum.textContent = `최대 ${Math.round(maxRatio * 100)}%`;
     }
-    for (const [district, group] of groups) {
-      const metrics = districtRisk(group);
-      const intensity = maxRatio > 0 ? Math.max(0.25, metrics.ratio / maxRatio) : 0.25;
-      state.districtOverlays.push(makeDistrictBubble(district, group, intensity));
+    for (const { district, group, metrics } of districtMetrics) {
+      const diameter = maxAmount > 0
+        ? Math.max(config.map.districtBubbleMinDiameter,
+          Math.min(config.map.districtBubbleMaxDiameter,
+            Math.sqrt(metrics.amount / maxAmount) * config.map.districtBubbleMaxDiameter))
+        : config.map.districtBubbleMinDiameter;
+      const intensity = state.metric === 'volume'
+        ? 0.55
+        : metrics.decreaseCount === metrics.increaseCount || maxDominantRatio === 0
+          ? 0.25
+          : Math.max(0.25, metrics.dominantRatio / maxDominantRatio);
+      state.districtOverlays.push(makeDistrictBubble(district, group, metrics, diameter, intensity));
     }
     showSelectedStation();
-    elements.mapStatus.textContent = `${state.district ? '자치구 범위' : '서울 전체'} · 자치구별 위험`;
+    elements.mapStatus.textContent = `${state.district ? '자치구 범위' : '서울 전체'} · 자치구별 지표`;
     return;
   }
 
@@ -1174,6 +1242,10 @@ async function loadData() {
     state.source = dashboardData.source;
     state.stale = dashboardData.stale;
     state.staleReason = dashboardData.staleReason;
+    state.risk = 'all';
+    if (state.horizon === 'now') state.horizon = 'h1';
+    syncHorizonControls();
+    syncMetricControls();
     state.demoForecasts = config.demoForecasts && state.allStations.some((station) => station.forecastSource === 'demo');
     fillDistrictSelect();
     elements.districtFilter.value = state.district;
@@ -1259,6 +1331,8 @@ function setupMap() {
 }
 
 function bindControls() {
+  syncHorizonControls();
+  syncMetricControls();
   elements.refreshButton.addEventListener('click', loadData);
   elements.exportCsv.addEventListener('click', exportCsv);
   elements.districtFilter.addEventListener('change', () => {
@@ -1272,12 +1346,9 @@ function bindControls() {
   document.querySelectorAll('[data-metric]').forEach((button) => {
     button.addEventListener('click', () => {
       state.metric = button.dataset.metric;
-      document.querySelectorAll('[data-metric]').forEach((item) => {
-        const active = item === button;
-        item.classList.toggle('active', active);
-        item.setAttribute('aria-pressed', String(active));
-      });
-      document.getElementById('flowFilterGroup').hidden = state.metric !== 'flow';
+      if (state.horizon === 'now') state.horizon = 'h1';
+      syncMetricControls();
+      syncHorizonControls();
       renderListForCriteriaChange();
     });
   });
@@ -1294,8 +1365,9 @@ function bindControls() {
   });
   document.querySelectorAll('[data-horizon]').forEach((button) => {
     button.addEventListener('click', () => {
+      if (button.dataset.horizon === 'now') return;
       state.horizon = button.dataset.horizon;
-      document.querySelectorAll('[data-horizon]').forEach((item) => item.classList.toggle('active', item === button));
+      syncHorizonControls();
       renderMapLayers();
     });
   });
