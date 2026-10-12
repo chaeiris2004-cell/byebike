@@ -3,7 +3,7 @@
   --ink: #18241f;
   --muted: #6d7972;
   --line: #dce2de;
-  --paper: #f1f3f0;
+  --paper: #fff;
   --white: #fff;
   --green: #087a52;
   --green-dark: #075d40;
@@ -114,14 +114,16 @@ kbd { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #e1e5e1; border-radius
 .summary-cell { display: flex; min-width: 0; flex-direction: column; gap: 3px; padding: 8px 5px; }
 .summary-cell + .summary-cell { border-left: 1px solid var(--line); }
 .summary-time { color: var(--muted); font-size: 9px; }
-.summary-count { display: flex; flex-direction: column; gap: 2px; font-family: var(--mono); font-size: 12px; line-height: 1.2; }
+.summary-count { display: flex; flex-direction: column; gap: 2px; font-family: var(--mono); font-size: 12px; font-weight: 400; line-height: 1.2; }
 .summary-risk-line { display: flex; min-width: 0; align-items: baseline; gap: 2px; white-space: nowrap; }
 .summary-risk-number { color: var(--ink); font-weight: 400; }
-.summary-risk-number.shortage, .summary-risk-total.shortage > span:first-child { color: var(--shortage); font-weight: 700; }
-.summary-risk-number.surplus, .summary-risk-total.surplus > span:first-child { color: var(--surplus); font-weight: 700; }
+.summary-risk-number.shortage, .summary-risk-total.shortage > span:first-child { color: var(--shortage); font-weight: 400; }
+.summary-risk-number.surplus, .summary-risk-total.surplus > span:first-child { color: var(--surplus); font-weight: 400; }
 .summary-total { color: var(--ink); }
 .summary-unit { color: var(--muted); font-size: 8px; font-family: var(--sans); }
 .summary-risk-total { display: inline-flex; flex: 0 1 auto; gap: 2px; overflow: hidden; margin-left: auto; color: var(--muted); font-family: var(--sans); font-size: 8px; text-overflow: ellipsis; }
+.summary-cell.all .summary-risk-line { flex-wrap: wrap; white-space: normal; }
+.summary-cell.all .summary-risk-total { flex: 0 0 100%; overflow: visible; margin-left: 0; text-overflow: clip; }
 .summary-units { display: flex; min-height: 12px; align-items: baseline; gap: 3px; overflow: hidden; color: var(--ink); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .summary-units .summary-risk-number { font-family: var(--mono); font-size: 12px; }
 
@@ -147,8 +149,8 @@ kbd { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #e1e5e1; border-radius
 .station-sub { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
 .stock-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; font-family: var(--mono); font-size: 10px; }
 .stock-primary { font-size: 13px; font-weight: 400; line-height: 1.2; white-space: nowrap; }
-.stock-primary.shortage, .stock-value.shortage { color: var(--shortage); font-weight: 700; }
-.stock-primary.surplus, .stock-value.surplus { color: var(--surplus); font-weight: 700; }
+.stock-primary.shortage, .stock-value.shortage { color: var(--shortage); font-weight: 400; }
+.stock-primary.surplus, .stock-value.surplus { color: var(--surplus); font-weight: 400; }
 .stock-primary.normal, .stock-value.normal, .stock-capacity { color: var(--ink); }
 .stock-details { display: flex; min-width: 0; align-items: baseline; gap: 2px; font-size: 10px; white-space: nowrap; }
 .stock-value { font-weight: 400; }
@@ -165,7 +167,7 @@ kbd { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #e1e5e1; border-radius
 .panel-footer { display: flex; flex: 0 0 auto; justify-content: space-between; gap: 8px; padding: 8px 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; }
 .forecast-note { color: #946a1f; }
 
-.district-bubble { --bubble-color: #55645b; display: flex; min-width: 82px; min-height: 58px; flex-direction: column; align-items: center; justify-content: center; padding: 7px 10px; border: 2px solid #fff; border-radius: 999px; color: #fff; background: color-mix(in srgb, var(--bubble-color) var(--intensity, 100%), #fff); box-shadow: 0 3px 10px #17261d35; cursor: pointer; transform: translateY(-50%); }
+.district-bubble { --bubble-color: #55645b; display: flex; min-width: 82px; min-height: 58px; flex-direction: column; align-items: center; justify-content: center; padding: 7px 10px; border: 0; border-radius: 999px; color: #fff; background: color-mix(in srgb, var(--bubble-color) var(--intensity, 100%), #fff); box-shadow: 0 3px 10px #17261d35; cursor: pointer; transform: translateY(-50%); }
 .district-bubble.shortage { --bubble-color: #b94335; }
 .district-bubble.surplus { --bubble-color: #2768a6; }
 .district-bubble.normal { --bubble-color: #55645b; }
