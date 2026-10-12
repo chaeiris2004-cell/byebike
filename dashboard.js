@@ -423,8 +423,31 @@ function createStockCell(station, horizon) {
   return cell;
 }
 
+function centerSelectedRow(stationId, source) {
+  const container = document.getElementById('tableScroll');
+  const row = container?.querySelector(`[data-station-id="${CSS.escape(stationId)}"]`);
+  if (!container || !row) return;
+
+  const containerRect = container.getBoundingClientRect();
+  const headerHeight = container.querySelector('thead')?.getBoundingClientRect().height || 0;
+  const visibleTop = containerRect.top + container.clientTop + headerHeight;
+  const visibleBottom = containerRect.top + container.clientTop + container.clientHeight;
+  const rowRect = row.getBoundingClientRect();
+  if (source === 'row' && rowRect.top >= visibleTop && rowRect.bottom <= visibleBottom) return;
+
+  const visibleCenter = visibleTop + (visibleBottom - visibleTop) / 2;
+  const rowCenter = rowRect.top + rowRect.height / 2;
+  const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+  const scrollTop = Math.min(maxScrollTop, Math.max(0, container.scrollTop + rowCenter - visibleCenter));
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    container.scrollTop = scrollTop;
+  } else {
+    container.scrollTo({ top: scrollTop, behavior: 'smooth' });
+  }
+}
+
 function selectStation(station, options = {}) {
-  const { focusMap = true, openInfo = true, marker: suppliedMarker = null } = options;
+  const { focusMap = true, openInfo = true, marker: suppliedMarker = null, source = 'map' } = options;
   if (!stationMatchesRisk(station)) {
     state.risk = 'all';
     document.querySelector('[data-risk="all"]').classList.add('active');
@@ -452,10 +475,7 @@ function selectStation(station, options = {}) {
     marker.setMap(state.map);
     openStationInfo(station, marker);
   }
-  requestAnimationFrame(() => {
-    const row = document.querySelector(`[data-station-id="${CSS.escape(station.stationId)}"]`);
-    if (row) row.scrollIntoView({ block: 'nearest' });
-  });
+  requestAnimationFrame(() => centerSelectedRow(station.stationId, source));
 }
 
 function renderSelectedStation(station) {
@@ -556,9 +576,12 @@ function renderRows() {
     nameCell.append(name, district);
     row.append(nameCell);
     for (const { key } of horizons) row.append(createStockCell(station, key));
-    row.addEventListener('click', () => selectStation(station));
+    row.addEventListener('click', () => selectStation(station, { source: 'row' }));
     row.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectStation(station); }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectStation(station, { source: 'row' });
+      }
     });
     fragment.append(row);
   }
@@ -834,7 +857,7 @@ function focusDistrict(district) {
 }
 
 function focusStation(station) {
-  selectStation(station, { focusMap: true, openInfo: true });
+  selectStation(station, { focusMap: true, openInfo: true, source: 'search' });
 }
 
 function stationMatchesRisk(station) {
