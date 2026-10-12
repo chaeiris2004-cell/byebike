@@ -75,46 +75,97 @@ function stableSeed(stationId) {
   return seed;
 }
 
-function clampStock(value, capacity) {
-  return Math.max(0, Math.min(capacity, Math.round(value)));
-}
-
 function stockValue(value) {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function makeDemoForecast(stationId, now, capacity) {
+function flowValue(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function makeDemoFlow(stationId, rackTotCnt, stockNow) {
   const seed = stableSeed(stationId);
-  const firstShift = (seed % 13) - 6;
-  const laterShift = ((seed >>> 4) % 15) - 7;
-  return {
-    h1: clampStock(now + firstShift, capacity),
-    h2: clampStock(now + firstShift + laterShift / 2, capacity),
-    h3: clampStock(now + firstShift + laterShift, capacity)
-  };
+  const rackScale = Math.max(0, rackTotCnt);
+  const flow = {};
+  const volume = {};
+  const intervals = ['h1', 'h2', 'h3'];
+  intervals.forEach((key, index) => {
+    const intervalSeed = (seed + Math.imul(index + 1, 0x9e3779b1) + Math.round(stockNow || 0)) >>> 0;
+    const sizeRatio = 0.1 + (intervalSeed % 501) / 1000;
+    const variation = 0.8 + ((intervalSeed >>> 9) % 401) / 1000;
+    const intervalVolume = Math.round(rackScale * sizeRatio * variation);
+    const rentalShare = 0.2 + ((intervalSeed >>> 18) % 601) / 1000;
+    const rentals = Math.round(intervalVolume * rentalShare);
+    volume[key] = intervalVolume;
+    flow[key] = intervalVolume - 2 * rentals;
+  });
+  return { flow, volume };
+}
+
+function warnInvalidFlowData(stations) {
+  const invalidStations = stations.filter((station) =>
+    ['h1', 'h2', 'h3'].some((key) => {
+      const flow = station.flow[key];
+      const volume = station.volume[key];
+      if (flow === null || volume === null) return false;
+      return volume < 0
+        || Math.abs(flow) > volume
+        || Math.abs(flow) % 2 !== volume % 2;
+    })
+  );
+  if (invalidStations.length) {
+    console.warn('Flow/volume contract violation:', invalidStations.map((station) => station.stationId));
+  }
 }
 
 function toDashboardData(payload) {
   const rawStations = Array.isArray(payload.stations) ? payload.stations : [];
   const stations = rawStations.map((raw) => {
     const rawStock = raw.stock || {};
+    const rawFlow = raw.flow || {};
+    const rawVolume = raw.volume || {};
     const stationId = String(raw.stationId ?? raw.id ?? '');
     const stationName = String(raw.stationName ?? raw.name ?? '이름 없는 대여소');
     const rackTotCnt = Number(raw.rackTotCnt ?? raw.rackCount) || 0;
     const stockNow = stockValue(rawStock.now ?? raw.bikeCount);
-    let stockH1 = stockValue(rawStock.h1);
-    let stockH2 = stockValue(rawStock.h2);
-    let stockH3 = stockValue(rawStock.h3);
     let generatedForecast = false;
+    const flow = {
+      now: null,
+      h1: flowValue(rawFlow.h1),
+      h2: flowValue(rawFlow.h2),
+      h3: flowValue(rawFlow.h3)
+    };
+    const volume = {
+      now: null,
+      h1: flowValue(rawVolume.h1),
+      h2: flowValue(rawVolume.h2),
+      h3: flowValue(rawVolume.h3)
+    };
+    if (config.demoForecasts) {
+      const missingIntervals = ['h1', 'h2', 'h3'].some((key) => flow[key] === null && volume[key] === null);
+      if (missingIntervals) {
+        const demo = makeDemoFlow(stationId, rackTotCnt, stockNow);
+        for (const key of ['h1', 'h2', 'h3']) {
+          if (flow[key] === null && volume[key] === null) {
+            flow[key] = demo.flow[key];
+            volume[key] = demo.volume[key];
+          }
+        }
+        generatedForecast = true;
+      }
+    }
 
-    if (config.demoForecasts && rackTotCnt > 0 && stockNow !== null && (stockH1 === null || stockH2 === null || stockH3 === null)) {
-      const demo = makeDemoForecast(stationId, stockNow, rackTotCnt);
-      if (stockH1 === null) stockH1 = demo.h1;
-      if (stockH2 === null) stockH2 = demo.h2;
-      if (stockH3 === null) stockH3 = demo.h3;
-      generatedForecast = true;
+    const stock = { now: stockNow };
+    let previousStock = stockNow;
+    for (const key of ['h1', 'h2', 'h3']) {
+      const suppliedStock = stockValue(rawStock[key]);
+      const calculatedStock = previousStock === null || flow[key] === null
+        ? null
+        : Math.max(0, previousStock + flow[key]);
+      stock[key] = suppliedStock ?? calculatedStock;
+      previousStock = stock[key];
     }
 
     return {
@@ -124,11 +175,14 @@ function toDashboardData(payload) {
       lat: Number(raw.lat ?? raw.latitude),
       lon: Number(raw.lon ?? raw.longitude),
       rackTotCnt,
-      stock: { now: stockNow, h1: stockH1, h2: stockH2, h3: stockH3 },
+      stock,
+      flow,
+      volume,
       forecastSource: generatedForecast ? 'demo' : 'model',
       extra: raw.extra || {}
     };
   }).filter((station) => station.stationId && Number.isFinite(station.lat) && Number.isFinite(station.lon));
+  if (config.demoForecasts) warnInvalidFlowData(stations);
 
   return {
     baseTime: payload.baseTime || (payload.fetchedAt ? new Date(payload.fetchedAt * 1000).toISOString() : new Date().toISOString()),
