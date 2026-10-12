@@ -77,12 +77,6 @@ kbd { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #e1e5e1; border-radius
 .map-period { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid #dce2de; border-radius: 7px; background: #ffffffed; pointer-events: auto; }
 .map-period button { min-width: 44px; height: 28px; padding: 0 7px; border: 0; border-radius: 5px; background: transparent; color: #526057; font-size: 10px; }
 .map-period button.active { color: #fff; background: #253d32; }
-.map-legend { position: absolute; z-index: 5; bottom: 14px; left: 14px; display: flex; gap: 13px; padding: 8px 10px; border: 1px solid #dce2de; border-radius: 6px; background: #ffffffed; font-size: 10px; pointer-events: none; }
-.map-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.legend-dot { width: 8px; height: 8px; border-radius: 50%; }
-.legend-dot.shortage { background: var(--shortage); }
-.legend-dot.surplus { background: var(--surplus); }
-.legend-dot.normal { background: #7a8780; }
 .map-status { position: absolute; z-index: 5; right: 14px; bottom: 14px; padding: 8px 10px; border: 1px solid #dce2de; border-radius: 6px; background: #ffffffed; color: #526057; font-size: 10px; pointer-events: none; }
 .resize-handle { position: relative; z-index: 10; cursor: col-resize; background: transparent; touch-action: none; }
 .resize-handle::after { position: absolute; top: 50%; left: 3px; width: 2px; height: 38px; border-radius: 2px; background: #c7d0c9; content: ""; transform: translateY(-50%); }
@@ -176,12 +170,6 @@ kbd { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #e1e5e1; border-radius
 .district-bubble.volume { --bubble-color: var(--ink); }
 .district-bubble strong { font-size: 13px; font-weight: 700; white-space: nowrap; }
 .district-bubble span { margin-top: 2px; font-family: var(--mono); font-size: 12px; white-space: nowrap; }
-.district-legend { position: absolute; z-index: 6; bottom: 14px; left: 14px; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #d9dfdb; border-radius: 6px; color: #344239; background: #ffffffed; box-shadow: 0 2px 8px #17261d1a; font-size: 10px; pointer-events: none; }
-.district-legend[hidden] { display: none; }
-.district-legend-bar { width: 72px; height: 8px; border-radius: 999px; background: linear-gradient(90deg, #f0f2f1, var(--legend-color, #55645b)); }
-.district-legend.shortage .district-legend-bar { --legend-color: #b94335; }
-.district-legend.surplus .district-legend-bar { --legend-color: #2768a6; }
-.district-legend-maximum { font-family: var(--mono); font-weight: 600; }
 .cluster-label { display: grid; width: 38px; height: 38px; place-items: center; border: 2px solid #fff; border-radius: 50%; color: #fff; background: #43594d; box-shadow: 0 2px 8px #15221b4d; font-family: var(--mono); font-size: 11px; }
 .map-info { position: relative; box-sizing: border-box; width: max-content; min-width: 160px; max-width: min(260px, 80vw); padding: 12px 14px; border-radius: 8px; color: var(--ink); background: #fff; box-shadow: 0 3px 12px #17261d35; font-family: var(--sans); line-height: 1.5; word-break: keep-all; overflow-wrap: anywhere; white-space: normal; pointer-events: auto; transform: translateY(-54px); }
 .map-info::after { position: absolute; bottom: -8px; left: 50%; width: 0; height: 0; border-top: 8px solid #fff; border-right: 8px solid transparent; border-left: 8px solid transparent; content: ''; transform: translateX(-50%); }

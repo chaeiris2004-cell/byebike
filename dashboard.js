@@ -35,8 +35,6 @@ const state = {
   map: null,
   clusterer: null,
   infoOverlay: null,
-  districtLegend: null,
-  districtLegendMaximum: null,
   mapMetricMaximum: 0,
   markers: new Map(),
   districtOverlays: [],
@@ -736,8 +734,9 @@ function removeDistrictOverlays() {
 function stationGroups(stations) {
   const groups = new Map();
   for (const station of stations) {
-    if (!groups.has(station.gu || '기타')) groups.set(station.gu || '기타', []);
-    groups.get(station.gu || '기타').push(station);
+    if (!station.gu) continue;
+    if (!groups.has(station.gu)) groups.set(station.gu, []);
+    groups.get(station.gu).push(station);
   }
   return groups;
 }
@@ -928,7 +927,6 @@ function renderMapLayers() {
   const stations = currentMapStations();
   state.mapMetricMaximum = mapMetricMaximumForStage(stations, stage);
   const selectedStation = state.allStations.find((station) => station.stationId === state.selectedStationId);
-  if (state.districtLegend) state.districtLegend.hidden = stage !== 'district';
   removeDistrictOverlays();
   state.clusterer.clear();
 
@@ -953,12 +951,6 @@ function renderMapLayers() {
       metrics: districtRisk(group)
     }));
     const maxAmount = Math.max(0, ...districtMetrics.map(({ metrics }) => metrics.amount));
-    const maxDominantRatio = Math.max(0, ...districtMetrics.map(({ metrics }) => metrics.dominantRatio));
-    const maxRatio = maxDominantRatio;
-    if (state.districtLegend) {
-      state.districtLegend.className = `district-legend ${state.risk}`;
-      state.districtLegendMaximum.textContent = `최대 ${Math.round(maxRatio * 100)}%`;
-    }
     const bubbleScaleByLevel = config.map.bubbleScaleByLevel;
     const bubbleScaleLevels = Object.keys(bubbleScaleByLevel).map(Number).sort((a, b) => a - b);
     const minBubbleScaleLevel = bubbleScaleLevels[0];
@@ -1151,7 +1143,7 @@ function exportCsv() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `bikebike-risk-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `bikebike-flow-${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -1266,17 +1258,6 @@ function setupMap() {
     center: new kakao.maps.LatLng(37.5665, 126.9780),
     level: 9
   });
-  state.districtLegend = document.createElement('div');
-  state.districtLegend.className = 'district-legend';
-  state.districtLegend.hidden = true;
-  const legendBar = document.createElement('span');
-  legendBar.className = 'district-legend-bar';
-  const legendLabel = textNode('span', '구별 비율 낮음 → 높음');
-  const legendMaximum = textNode('span', '');
-  legendMaximum.className = 'district-legend-maximum';
-  state.districtLegend.append(legendBar, legendLabel, legendMaximum);
-  document.querySelector('.map-panel').append(state.districtLegend);
-  state.districtLegendMaximum = legendMaximum;
   state.clusterer = new kakao.maps.MarkerClusterer({
     map: state.map,
     averageCenter: true,
