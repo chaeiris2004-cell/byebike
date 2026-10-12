@@ -214,38 +214,10 @@ function formatTime(value) {
   return new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
 }
 
-function riskAt(station, horizon) {
-  const stock = station.stock[horizon];
-  const capacity = station.rackTotCnt;
-  if (!Number.isFinite(stock) || capacity <= 0) return { type: 'unknown', stock: null, units: 0 };
-
-  const rate = stock / capacity;
-  if (rate <= config.thresholds.shortageRate) {
-    return {
-      type: 'shortage',
-      stock,
-      units: Math.max(0, Math.ceil(capacity * config.thresholds.targetRate) - stock)
-    };
-  }
-  if (rate >= config.thresholds.surplusRate) {
-    return {
-      type: 'surplus',
-      stock,
-      units: Math.max(0, stock - Math.floor(capacity * config.thresholds.targetRate))
-    };
-  }
-  return { type: 'normal', stock, units: 0 };
-}
-
-function stationMatchesRisk(station) {
-  if (state.risk === 'all') return true;
-  return horizons.some(({ key }) => riskAt(station, key).type === state.risk);
-}
-
 function filteredStations() {
   return state.allStations.filter((station) => {
     const districtMatch = !state.district || station.gu === state.district;
-    return districtMatch && stationMatchesRisk(station);
+    return districtMatch;
   });
 }
 
@@ -264,23 +236,6 @@ function stationMatchesFlowFilter(station) {
 
 function stationsForSummary() {
   return state.allStations.filter((station) => !state.district || station.gu === state.district);
-}
-
-function statusText(risk, riskMode) {
-  if (risk.type === 'unknown') return '예측 없음';
-  if (risk.type === 'shortage') return `부족 −${risk.units}`;
-  if (risk.type === 'surplus') return `과잉 +${risk.units}`;
-  return riskMode === 'all' ? '안정' : '정상';
-}
-
-function statusClass(risk) {
-  return risk.type === 'shortage' ? 'shortage' : risk.type === 'surplus' ? 'surplus' : risk.type;
-}
-
-function relevantRisk(risk) {
-  if (state.risk === 'shortage') return risk.type === 'shortage';
-  if (state.risk === 'surplus') return risk.type === 'surplus';
-  return risk.type === 'shortage' || risk.type === 'surplus';
 }
 
 function compareStationNames(left, right) {
@@ -314,23 +269,7 @@ function sortedRows() {
 }
 
 function sortedCsvRows() {
-  const rows = filteredStations();
-  rows.sort((left, right) => {
-    const nameOrder = compareStationNames(left, right);
-    if (state.sortKey === 'stationName') return state.sortDir === 'asc' ? nameOrder : -nameOrder;
-    const leftRisk = riskAt(left, state.sortKey);
-    const rightRisk = riskAt(right, state.sortKey);
-    const isRiskValue = (risk) => risk.type === 'shortage' || risk.type === 'surplus';
-    const leftHasRisk = isRiskValue(leftRisk);
-    const rightHasRisk = isRiskValue(rightRisk);
-    if (leftHasRisk !== rightHasRisk) return leftHasRisk ? -1 : 1;
-    if (!leftHasRisk) return nameOrder;
-    const byUnits = state.sortDir === 'desc'
-      ? rightRisk.units - leftRisk.units
-      : leftRisk.units - rightRisk.units;
-    return byUnits || nameOrder;
-  });
-  return rows;
+  return sortedRows();
 }
 
 function updateSortHeaders() {
@@ -626,12 +565,31 @@ function renderSelectedStation(station) {
     kakao.maps.event.preventMap();
     clearSelection();
   });
-  content.append(
-    closeButton,
-    textNode('strong', station.stationName),
-    textNode('span', `${station.gu} · ${station.rackTotCnt} 거치대`),
-    textNode('span', `현재 ${formatStock(station.stock.now)} · +1h ${formatStock(station.stock.h1)} · +2h ${formatStock(station.stock.h2)} · +3h ${formatStock(station.stock.h3)}`)
-  );
+  content.append(closeButton, textNode('strong', station.stationName));
+  const district = textNode('span', station.gu || '자치구 미상');
+  district.className = 'map-info-district';
+  content.append(district);
+
+  const current = textNode('span', `현재 재고 ${formatStock(station.stock.now)} / 거치대 ${formatStock(station.rackTotCnt)} (대)`);
+  current.className = 'map-info-current';
+  content.append(current);
+
+  for (const { key } of horizons.filter(({ key }) => key !== 'now')) {
+    const period = document.createElement('div');
+    period.className = 'map-info-period';
+    const heading = textNode('span', `+${key.slice(1)}h`);
+    heading.className = 'map-info-period-label';
+    const flow = station.flow[key];
+    const flowText = Number.isFinite(flow) ? `${flow > 0 ? '+' : flow < 0 ? '−' : ''}${formatStock(Math.abs(flow))} (대)` : '-';
+    const flowRow = textNode('span', `순증감 ${flowText}`);
+    flowRow.className = `map-info-flow${flow < 0 ? ' shortage' : flow > 0 ? ' surplus' : ''}`;
+    const volumeRow = textNode('span', `이용량 ${formatStock(station.volume[key])} (대)`);
+    volumeRow.className = 'map-info-volume';
+    const stockRow = textNode('span', `예상 재고 ${formatStock(station.stock[key])} / 거치대 ${formatStock(station.rackTotCnt)} (대)`);
+    stockRow.className = 'map-info-stock';
+    period.append(heading, flowRow, volumeRow, stockRow);
+    content.append(period);
+  }
   return content;
 }
 
@@ -642,7 +600,7 @@ function textNode(tag, text) {
 }
 
 function formatStock(value) {
-  return Number.isFinite(value) ? `${value}대` : '예측 없음';
+  return Number.isFinite(value) ? value.toLocaleString('ko-KR') : '-';
 }
 
 function openStationInfo(station, marker) {
@@ -1076,10 +1034,6 @@ function focusStation(station) {
   selectStation(station, { focusMap: true, openInfo: true, source: 'search' });
 }
 
-function stationMatchesRisk(station) {
-  return state.risk === 'all' || horizons.some(({ key }) => riskAt(station, key).type === state.risk);
-}
-
 function showSuggestions(query) {
   const normalized = query.trim().toLocaleLowerCase('ko-KR');
   state.suggestions = [];
@@ -1172,20 +1126,20 @@ function chooseSuggestion(index) {
 
 function buildCsv(rows) {
   const columns = [
-    ['stationId', '대여소ID'], ['stationName', '대여소명'], ['gu', '자치구'], ['rackTotCnt', '거치대수'],
-    ['now', '현재재고'], ['nowRisk', '현재위험'], ['h1', '+1시간재고'], ['h1Risk', '+1시간위험'],
-    ['h2', '+2시간재고'], ['h2Risk', '+2시간위험'],
-    ['h3', '+3시간재고'], ['h3Risk', '+3시간위험'], ['lat', '위도'], ['lon', '경도']
+    ['stationId', '대여소ID'], ['stationName', '대여소명'], ['gu', '자치구'], ['rackTotCnt', '거치대'],
+    ['now', '현재 재고'], ['flowH1', '순증감 +1h'], ['flowH2', '순증감 +2h'], ['flowH3', '순증감 +3h'],
+    ['volumeH1', '이용량 +1h'], ['volumeH2', '이용량 +2h'], ['volumeH3', '이용량 +3h'],
+    ['stockH1', '예상 재고 +1h'], ['stockH2', '예상 재고 +2h'], ['stockH3', '예상 재고 +3h']
   ];
   const escape = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
   const lines = [columns.map(([, label]) => escape(label)).join(',')];
   for (const station of rows) {
     const record = {
       stationId: station.stationId, stationName: station.stationName, gu: station.gu, rackTotCnt: station.rackTotCnt,
-      now: station.stock.now, nowRisk: statusText(riskAt(station, 'now'), state.risk),
-      h1: station.stock.h1, h1Risk: statusText(riskAt(station, 'h1'), state.risk),
-      h2: station.stock.h2, h2Risk: statusText(riskAt(station, 'h2'), state.risk),
-      h3: station.stock.h3, h3Risk: statusText(riskAt(station, 'h3'), state.risk), lat: station.lat, lon: station.lon
+      now: station.stock.now,
+      flowH1: station.flow.h1, flowH2: station.flow.h2, flowH3: station.flow.h3,
+      volumeH1: station.volume.h1, volumeH2: station.volume.h2, volumeH3: station.volume.h3,
+      stockH1: station.stock.h1, stockH2: station.stock.h2, stockH3: station.stock.h3
     };
     lines.push(columns.map(([key]) => escape(record[key])).join(','));
   }

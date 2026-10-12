@@ -161,9 +161,6 @@ kbd { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #e1e5e1; border-radius
 .stock-value { font-weight: 400; }
 .stock-capacity { font-weight: 400; }
 .stock-unit { color: var(--muted); font-size: 7px; }
-.status.shortage { color: var(--shortage); }
-.status.surplus { color: var(--surplus); }
-.status.normal, .status.unknown { color: var(--muted); }
 .table-empty { padding: 30px 15px; color: var(--muted); font-size: 11px; text-align: center; }
 .pagination { display: flex; min-height: 40px; align-items: center; justify-content: space-between; padding: 0 14px; border-top: 1px solid var(--line); color: var(--muted); font-family: var(--mono); font-size: 9px; }
 .page-actions { display: flex; gap: 5px; }
@@ -190,6 +187,12 @@ kbd { flex: 0 0 auto; padding: 2px 5px; border: 1px solid #e1e5e1; border-radius
 .map-info::after { position: absolute; bottom: -8px; left: 50%; width: 0; height: 0; border-top: 8px solid #fff; border-right: 8px solid transparent; border-left: 8px solid transparent; content: ''; transform: translateX(-50%); }
 .map-info strong { display: block; margin-bottom: 5px; padding-right: 20px; font-size: 13px; }
 .map-info span { display: block; color: var(--muted); font-size: 11px; }
+.map-info .map-info-current { margin-top: 5px; color: var(--ink); }
+.map-info-period { margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line); }
+.map-info .map-info-period-label { margin-bottom: 2px; color: var(--ink); font-weight: 600; }
+.map-info .map-info-flow, .map-info .map-info-volume, .map-info .map-info-stock { color: var(--ink); }
+.map-info .map-info-flow.shortage { color: var(--shortage); }
+.map-info .map-info-flow.surplus { color: var(--surplus); }
 .map-info-close { position: absolute; top: 4px; right: 4px; display: grid; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; color: var(--muted); background: transparent; cursor: pointer; font: inherit; font-size: 18px; line-height: 1; pointer-events: auto; }
 .toast { position: fixed; z-index: 80; bottom: 32px; left: 50%; padding: 10px 14px; border-radius: 7px; color: #fff; background: #253d32; box-shadow: 0 4px 18px #1113; font-size: 11px; transform: translateX(-50%); }
 

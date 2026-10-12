@@ -3,11 +3,6 @@ window.OPERATOR_CONFIG = Object.freeze({
   refreshIntervalMs: 300000,
   pageSize: 75,
   demoForecasts: true,
-  thresholds: Object.freeze({
-    shortageRate: 0.2,
-    surplusRate: 0.9,
-    targetRate: 0.5
-  }),
   map: Object.freeze({
     districtBubbleLevel: 7,
     clusterLevel: 6,
