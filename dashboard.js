@@ -354,10 +354,15 @@ function formatStock(value) {
 }
 
 function openStationInfo(station, marker) {
+  const content = renderSelectedStation(station);
   state.infoOverlay.setMap(null);
-  state.infoOverlay.setContent(renderSelectedStation(station));
+  state.infoOverlay.setContent(content);
   state.infoOverlay.setPosition(marker.getPosition());
   state.infoOverlay.setMap(state.map);
+  content.style.pointerEvents = 'auto';
+  if (content.parentNode instanceof HTMLElement) {
+    content.parentNode.style.pointerEvents = 'none';
+  }
 }
 
 function closeStationInfo() {
@@ -596,12 +601,21 @@ function renderMapLayers() {
   if (!state.map || !state.clusterer) return;
   const stage = mapStage();
   const stations = currentMapStations();
+  const selectedStation = state.allStations.find((station) => station.stationId === state.selectedStationId);
   if (state.districtLegend) state.districtLegend.hidden = stage !== 'district';
   removeDistrictOverlays();
   state.clusterer.clear();
 
   for (const marker of state.markers.values()) marker.setMap(null);
   state.mapStage = stage;
+
+  const showSelectedStation = () => {
+    if (!selectedStation) return;
+    const marker = getMarker(selectedStation);
+    marker.setZIndex(10);
+    marker.setMap(state.map);
+    state.infoOverlay.setPosition(marker.getPosition());
+  };
 
   if (stage === 'district') {
     const displayDistricts = [...stationGroups(stations).keys()];
@@ -617,26 +631,30 @@ function renderMapLayers() {
       const intensity = maxRatio > 0 ? Math.max(0.25, metrics.ratio / maxRatio) : 0.25;
       state.districtOverlays.push(makeDistrictBubble(district, group, intensity));
     }
+    showSelectedStation();
     elements.mapStatus.textContent = `${state.district ? '자치구 범위' : '서울 전체'} · 자치구별 위험`;
     return;
   }
 
   if (stage === 'cluster') {
-    const markers = stations.map(getMarker);
+    const markers = stations
+      .filter((station) => station.stationId !== state.selectedStationId)
+      .map(getMarker);
     state.clusterer.addMarkers(markers);
+    showSelectedStation();
     elements.mapStatus.textContent = `${stations.length.toLocaleString('ko-KR')}개 대여소 · 클러스터 보기`;
     return;
   }
 
-  const visibleMarkers = updateVisibleStationMarkers(stations);
+  const visibleMarkers = updateVisibleStationMarkers(
+    stations.filter((station) => station.stationId !== state.selectedStationId)
+  );
+  showSelectedStation();
   elements.mapStatus.textContent = `${visibleMarkers.length.toLocaleString('ko-KR')}개 대여소 · 현재 화면`;
 }
 
 function refreshPointVisibility() {
-  if (state.mapStage === 'station') {
-    const visible = updateVisibleStationMarkers();
-    elements.mapStatus.textContent = `${visible.length.toLocaleString('ko-KR')}개 대여소 · 현재 화면`;
-  }
+  renderMapLayers();
 }
 
 function focusDistrict(district) {
@@ -887,7 +905,7 @@ function setupMap() {
     content: document.createElement('div'),
     xAnchor: 0.5,
     yAnchor: 1,
-    zIndex: 10,
+    zIndex: 11,
     clickable: true
   });
   kakao.maps.event.addListener(state.map, 'click', clearSelection);
