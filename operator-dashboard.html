@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/dashboard.css">
   <script src="/dashboard-config.js"></script>
-  <script>document.write(`<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(window.OPERATOR_CONFIG.kakaoJavaScriptKey)}&libraries=clusterer"><\/script>`);</script>
+  <script>window.kakaoSdkFailed = false; document.write(`<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(window.OPERATOR_CONFIG.kakaoJavaScriptKey)}&libraries=clusterer" onerror="window.kakaoSdkFailed = true"><\/script>`);</script>
   <script defer src="/dashboard.js"></script>
 </head>
 <body>
@@ -68,7 +68,7 @@
               <span class="section-kicker">REBALANCING QUEUE</span>
               <h1>대여소 지표</h1>
             </div>
-            <button class="text-button export-button" id="exportCsv" type="button" title="현재 필터 결과 CSV 다운로드">
+            <button class="text-button export-button" id="exportCsv" type="button" title="현재 필터 결과 CSV 다운로드" disabled>
               <span aria-hidden="true">↓</span> CSV
             </button>
           </div>
@@ -96,7 +96,12 @@
         <section class="summary-block" aria-label="시간대별 순증감 및 이용량 요약">
           <div class="summary-heading">
             <h2>지표 요약</h2>
+            <small class="demo-data-note" id="demoDataNote" hidden>데모 데이터 · 순증감, 이용량, 예상 재고는 임의 생성값</small>
             <span id="summaryScope">서울 전체</span>
+          </div>
+          <div class="data-error" id="dataError" hidden>
+            <span>데이터를 불러오지 못했습니다</span>
+            <button type="button" id="retryLoad">다시 시도</button>
           </div>
           <div class="summary-grid">
             <article class="summary-cell" data-summary="now">

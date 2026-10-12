@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import threading
 import time
@@ -18,6 +19,12 @@ DAILY_CALL_LIMIT = 800
 DIRECTORY_CACHE_SECONDS = 21600
 PAGE_SIZE = 1000
 SAMPLE_PAGE_SIZE = 5
+SEOUL_DISTRICTS = (
+    "종로구", "중구", "용산구", "성동구", "광진구", "동대문구", "중랑구", "성북구",
+    "강북구", "도봉구", "노원구", "은평구", "서대문구", "마포구", "양천구", "강서구",
+    "구로구", "금천구", "영등포구", "동작구", "관악구", "서초구", "강남구", "송파구",
+    "강동구",
+)
 QUOTA_FILE = BASE_DIR / ".quota.json"
 KOREA_TIMEZONE = timezone(timedelta(hours=9))
 cache_lock = threading.Lock()
@@ -149,14 +156,15 @@ def read_api_key():
 def parse_int(value):
     try:
         return int(float(str(value).replace(",", "")))
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return None
 
 
 def parse_float(value):
     try:
-        return float(str(value).replace(",", ""))
-    except (TypeError, ValueError):
+        parsed = float(str(value).replace(",", ""))
+        return parsed if math.isfinite(parsed) else None
+    except (OverflowError, TypeError, ValueError):
         return None
 
 
@@ -180,6 +188,71 @@ def normalize_station(row):
         "shared": parse_float(row.get("shared")),
         "extra": {key: value for key, value in row.items() if key not in known_fields},
     }
+
+
+def haversine_distance(latitude, longitude, other_latitude, other_longitude):
+    earth_radius_km = 6371.0
+    latitude_delta = math.radians(other_latitude - latitude)
+    longitude_delta = math.radians(other_longitude - longitude)
+    latitude_radians = math.radians(latitude)
+    other_latitude_radians = math.radians(other_latitude)
+    haversine = (
+        math.sin(latitude_delta / 2) ** 2
+        + math.cos(latitude_radians)
+        * math.cos(other_latitude_radians)
+        * math.sin(longitude_delta / 2) ** 2
+    )
+    haversine = min(1.0, max(0.0, haversine))
+    return 2 * earth_radius_km * math.asin(math.sqrt(haversine))
+
+
+def has_valid_coordinates(location):
+    latitude = location["latitude"]
+    longitude = location["longitude"]
+    return (
+        isinstance(latitude, (int, float))
+        and math.isfinite(latitude)
+        and isinstance(longitude, (int, float))
+        and math.isfinite(longitude)
+    )
+
+
+def infer_station_districts(directory):
+    for location in directory.values():
+        if location["district"]:
+            continue
+        address_district = next(
+            (district for district in SEOUL_DISTRICTS if district in location["address"]),
+            None,
+        )
+        if address_district:
+            location["district"] = address_district
+            location["districtInferred"] = True
+
+    district_stations = [
+        location
+        for location in directory.values()
+        if location["district"]
+        and has_valid_coordinates(location)
+    ]
+    for location in directory.values():
+        if location["district"]:
+            continue
+        if not has_valid_coordinates(location):
+            continue
+        nearest = min(
+            district_stations,
+            key=lambda candidate: haversine_distance(
+                location["latitude"],
+                location["longitude"],
+                candidate["latitude"],
+                candidate["longitude"],
+            ),
+            default=None,
+        )
+        if nearest:
+            location["district"] = nearest["district"]
+            location["districtInferred"] = True
 
 
 def fetch_all_rows(api_key, service, response_key, page_size, paginate=True):
@@ -217,13 +290,20 @@ def load_station_directory(api_key):
             station_id = str(row.get("RENT_ID", ""))
             if not station_id:
                 continue
+            district = row.get("STA_LOC")
+            address_parts = (row.get("STA_ADD1"), row.get("STA_ADD2"))
             directory[station_id] = {
-                "district": str(row.get("STA_LOC", "")),
-                "address": " ".join(part for part in (row.get("STA_ADD1"), row.get("STA_ADD2")) if part),
+                "district": str(district).strip() if district is not None else "",
+                "address": " ".join(
+                    str(part).strip()
+                    for part in address_parts
+                    if part is not None and str(part).strip()
+                ),
                 "latitude": parse_float(row.get("STA_LAT")),
                 "longitude": parse_float(row.get("STA_LONG")),
             }
 
+        infer_station_districts(directory)
         cached_directory = directory
         directory_cache_expires_at = time.monotonic() + DIRECTORY_CACHE_SECONDS
         return directory
@@ -243,8 +323,10 @@ def load_stations():
         location = directory.get(station["id"], {})
         station["district"] = location.get("district", "")
         station["address"] = location.get("address", "")
-        station["latitude"] = station["latitude"] or location.get("latitude")
-        station["longitude"] = station["longitude"] or location.get("longitude")
+        if location.get("districtInferred"):
+            station["districtInferred"] = True
+        station["latitude"] = station["latitude"] if station["latitude"] is not None else location.get("latitude")
+        station["longitude"] = station["longitude"] if station["longitude"] is not None else location.get("longitude")
         stations.append(station)
 
     return {

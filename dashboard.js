@@ -18,7 +18,11 @@ const state = {
   nextFetchAt: null,
   stale: false,
   staleReason: null,
+  hasLoadedData: false,
+  initialLoadFailed: false,
+  refreshFailed: false,
   isLoading: false,
+  booted: false,
   source: 'live',
   demoForecasts: false,
   risk: 'all',
@@ -55,6 +59,9 @@ const elements = {
   clearDistrict: document.getElementById('clearDistrict'),
   activeFilter: document.getElementById('activeFilter'),
   summaryScope: document.getElementById('summaryScope'),
+  demoDataNote: document.getElementById('demoDataNote'),
+  dataError: document.getElementById('dataError'),
+  retryLoad: document.getElementById('retryLoad'),
   riskRows: document.getElementById('riskRows'),
   resultCount: document.getElementById('resultCount'),
   tableEmpty: document.getElementById('tableEmpty'),
@@ -77,6 +84,12 @@ function stableSeed(stationId) {
 }
 
 function stockValue(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function coordinateValue(value) {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -137,7 +150,8 @@ function toDashboardData(payload) {
     const rawVolume = raw.volume || {};
     const stationId = String(raw.stationId ?? raw.id ?? '');
     const stationName = String(raw.stationName ?? raw.name ?? '이름 없는 대여소');
-    const rackTotCnt = Number(raw.rackTotCnt ?? raw.rackCount) || 0;
+    const rackValue = Number(raw.rackTotCnt ?? raw.rackCount);
+    const rackTotCnt = Number.isFinite(rackValue) ? rackValue : 0;
     const stockNow = stockValue(rawStock.now ?? raw.bikeCount);
     let generatedForecast = false;
     const flow = {
@@ -181,8 +195,8 @@ function toDashboardData(payload) {
       stationId,
       stationName,
       gu: String(raw.gu ?? raw.district ?? ''),
-      lat: Number(raw.lat ?? raw.latitude),
-      lon: Number(raw.lon ?? raw.longitude),
+      lat: coordinateValue(raw.lat ?? raw.latitude),
+      lon: coordinateValue(raw.lon ?? raw.longitude),
       rackTotCnt,
       stock,
       flow,
@@ -190,7 +204,7 @@ function toDashboardData(payload) {
       forecastSource: generatedForecast ? 'demo' : 'model',
       extra: raw.extra || {}
     };
-  }).filter((station) => station.stationId && Number.isFinite(station.lat) && Number.isFinite(station.lon));
+  }).filter((station) => station.stationId);
   if (config.demoForecasts) warnInvalidFlowData(stations);
 
   return {
@@ -213,9 +227,12 @@ function formatTime(value) {
 }
 
 function filteredStations() {
+  const query = elements.search.value.trim().toLocaleLowerCase('ko-KR');
   return state.allStations.filter((station) => {
     const districtMatch = !state.district || station.gu === state.district;
-    return districtMatch;
+    const searchMatch = !query
+      || `${station.stationName} ${station.stationId} ${station.gu}`.toLocaleLowerCase('ko-KR').includes(query);
+    return districtMatch && searchMatch;
   });
 }
 
@@ -338,17 +355,45 @@ function updateDataStatus() {
   updateDataAge();
 }
 
+function showInitialLoadFailure() {
+  state.initialLoadFailed = true;
+  elements.dataMode.textContent = '연결 오류';
+  elements.dataMode.classList.add('demo');
+  elements.dataFreshness.textContent = '갱신 실패';
+  elements.dataFreshness.className = 'freshness-chip old';
+  elements.dataFreshness.title = '데이터를 불러오지 못했습니다.';
+  elements.dataError.hidden = false;
+  elements.retryLoad.disabled = false;
+  elements.resultCount.textContent = '데이터를 불러오지 못했습니다';
+  elements.tableEmpty.textContent = '데이터를 불러오지 못했습니다';
+  elements.tableEmpty.hidden = false;
+  renderDashboard();
+  if (state.map) elements.mapStatus.textContent = '데이터를 불러오지 못했습니다';
+}
+
 function updateDataAge() {
   if (!Number.isFinite(state.fetchedAt)) return;
+  if (state.refreshFailed) {
+    const lastDataTime = formatTime(state.fetchedAt * 1000);
+    elements.dataFreshness.textContent = `갱신 실패 · 마지막 데이터 ${lastDataTime}`;
+    elements.dataFreshness.className = 'freshness-chip old';
+    elements.dataFreshness.title = '갱신에 실패했습니다. 마지막으로 성공한 데이터를 표시 중입니다.';
+    return;
+  }
   const ageSeconds = Math.max(0, Math.floor(Date.now() / 1000 - state.fetchedAt));
   const ageLabel = ageSeconds < 60 ? '방금' : `${Math.floor(ageSeconds / 60)}분 전`;
   const old = state.stale || ageSeconds > 600;
   const delayed = !old && ageSeconds > 300;
   const status = old ? '오래된 데이터' : delayed ? '지연' : '최신';
   const className = old ? 'old' : delayed ? 'delayed' : 'latest';
-  const explanation = state.staleReason === 'quota' ? '호출 한도 보호'
-    : state.staleReason === 'error' ? '조회 실패' : '';
-  const tooltip = `서울시 원천 데이터는 최대 약 5분 늦게 반영될 수 있습니다.${state.stale && explanation ? ` (${explanation})` : ''}`;
+  const staleReasonText = state.staleReason === 'quota'
+    ? '일일 호출 한도 소진으로 저장된 데이터를 표시 중입니다'
+    : state.staleReason === 'error'
+      ? '원천 데이터 조회 실패로 저장된 데이터를 표시 중입니다'
+      : '저장된 데이터를 표시 중입니다';
+  const tooltip = state.stale
+    ? staleReasonText
+    : '서울시 원천 데이터는 최대 약 5분 늦게 반영될 수 있습니다.';
   elements.baseTime.textContent = `${formatTime(state.fetchedAt * 1000)} 기준 · ${ageLabel}`;
   elements.baseTime.title = tooltip;
   elements.dataFreshness.textContent = status;
@@ -360,12 +405,17 @@ function updateRefreshButton() {
   const remaining = Number.isFinite(state.nextFetchAt)
     ? Math.max(0, Math.ceil(state.nextFetchAt - Date.now() / 1000))
     : 0;
-  elements.refreshButton.disabled = state.isLoading || remaining > 0;
+  const retryAvailable = state.initialLoadFailed || state.refreshFailed;
+  elements.refreshButton.title = retryAvailable ? '다시 시도' : '데이터 새로고침';
+  elements.refreshButton.setAttribute('aria-label', retryAvailable ? '다시 시도' : '데이터 새로고침');
+  elements.refreshButton.disabled = state.isLoading || remaining > 0 && !retryAvailable;
   elements.refreshCountdown.textContent = state.isLoading
     ? '조회 중'
-    : remaining > 0
-      ? `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')} 후 가능`
-      : '새로고침';
+    : retryAvailable
+      ? '다시 시도'
+      : remaining > 0
+        ? `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')} 후 가능`
+        : '새로고침';
 }
 
 function fillDistrictSelect() {
@@ -386,6 +436,11 @@ function updateFilterSummary() {
     count.replaceChildren();
     units.replaceChildren();
     cell.classList.toggle('volume-summary', state.metric === 'volume');
+    if (state.initialLoadFailed) {
+      count.append(textNode('span', '—'));
+      units.append(textNode('span', '데이터 조회 실패'));
+      continue;
+    }
     const appendAmount = (parent, label, value, tone = 'neutral') => {
       const line = document.createElement('span');
       line.className = `metric-summary-line ${tone}`;
@@ -532,13 +587,15 @@ function selectStation(station, options = {}) {
   renderDashboard();
   renderSelectedStation(station);
 
-  if (focusMap) {
+  const canShowOnMap = Boolean(state.map && hasMapSdk()
+    && Number.isFinite(station.lat) && Number.isFinite(station.lon));
+  if (focusMap && canShowOnMap) {
     const position = new kakao.maps.LatLng(station.lat, station.lon);
     state.map.setLevel(5);
     state.map.panTo(position);
     document.getElementById('mapTitle').textContent = `${station.gu} · ${station.stationName}`;
   }
-  if (openInfo) {
+  if (openInfo && canShowOnMap) {
     const marker = suppliedMarker || getMarker(station);
     marker.setMap(state.map);
     openStationInfo(station, marker);
@@ -551,7 +608,7 @@ function renderSelectedStation(station) {
   content.className = 'map-info';
   content.addEventListener('click', (event) => {
     event.stopPropagation();
-    kakao.maps.event.preventMap();
+    if (hasMapSdk() && typeof kakao.maps.event?.preventMap === 'function') kakao.maps.event.preventMap();
   });
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
@@ -560,7 +617,7 @@ function renderSelectedStation(station) {
   closeButton.textContent = '×';
   closeButton.addEventListener('click', (event) => {
     event.stopPropagation();
-    kakao.maps.event.preventMap();
+    if (hasMapSdk() && typeof kakao.maps.event?.preventMap === 'function') kakao.maps.event.preventMap();
     clearSelection();
   });
   content.append(closeButton, textNode('strong', station.stationName));
@@ -598,7 +655,7 @@ function textNode(tag, text) {
 }
 
 function formatStock(value) {
-  return Number.isFinite(value) ? value.toLocaleString('ko-KR') : '-';
+  return Number.isFinite(value) ? value.toLocaleString('ko-KR') : '—';
 }
 
 function openStationInfo(station, marker) {
@@ -614,7 +671,7 @@ function openStationInfo(station, marker) {
 }
 
 function closeStationInfo() {
-  state.infoOverlay.setMap(null);
+  if (state.infoOverlay && hasMapSdk()) state.infoOverlay.setMap(null);
 }
 
 function clearSelection() {
@@ -673,20 +730,24 @@ function renderRows({ preservePage = false } = {}) {
   }
 
   elements.riskRows.replaceChildren(fragment);
-  elements.tableEmpty.hidden = rows.length > 0;
+  elements.tableEmpty.textContent = state.initialLoadFailed
+    ? '데이터를 불러오지 못했습니다'
+    : '조건에 맞는 대여소가 없습니다';
+  elements.tableEmpty.hidden = rows.length > 0 || !state.hasLoadedData && !state.initialLoadFailed;
   elements.resultCount.textContent = `${rows.length.toLocaleString('ko-KR')}곳`;
   elements.pageStatus.textContent = rows.length
     ? `${(start + 1).toLocaleString('ko-KR')}–${Math.min(start + config.pageSize, rows.length).toLocaleString('ko-KR')} / ${rows.length.toLocaleString('ko-KR')}`
     : '0 / 0';
   elements.previousPage.disabled = state.page <= 1;
   elements.nextPage.disabled = state.page >= totalPages;
+  elements.exportCsv.disabled = !state.hasLoadedData || rows.length === 0;
 }
 
 function renderDashboard(options = {}) {
   updateFilterSummary();
   renderRows(options);
   updateActiveFilter();
-  if (state.map) renderMapLayers();
+  renderMapLayers();
 }
 
 function syncHorizonControls() {
@@ -723,7 +784,11 @@ function showToast(message) {
 }
 
 function currentMapStations() {
-  return filteredStations();
+  return filteredTableStations().filter((station) => Number.isFinite(station.lat) && Number.isFinite(station.lon));
+}
+
+function hasMapSdk() {
+  return Boolean(window.kakao && window.kakao.maps);
 }
 
 function removeDistrictOverlays() {
@@ -790,7 +855,7 @@ function makeDistrictBubble(district, stations, metrics, diameter, intensity) {
   content.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
-    kakao.maps.event.preventMap();
+    if (hasMapSdk() && typeof kakao.maps.event?.preventMap === 'function') kakao.maps.event.preventMap();
     state.district = district;
     elements.districtFilter.value = district;
     renderListForCriteriaChange();
@@ -812,6 +877,7 @@ function makeDistrictBubble(district, stations, metrics, diameter, intensity) {
 }
 
 function mapStage() {
+  if (!state.map || !hasMapSdk()) return 'district';
   const level = state.map.getLevel();
   if (level >= config.map.districtBubbleLevel) return 'district';
   if (level >= config.map.clusterLevel) return 'cluster';
@@ -846,6 +912,7 @@ function markerImageFor(station) {
 }
 
 function syncSelectedMarker() {
+  if (!state.map || !hasMapSdk()) return;
   const stationsById = new Map(state.allStations.map((station) => [station.stationId, station]));
   state.markers.forEach((marker, stationId) => {
     const station = stationsById.get(stationId);
@@ -869,7 +936,7 @@ function getMarker(station) {
       clickable: true
     });
     kakao.maps.event.addListener(marker, 'click', () => {
-      kakao.maps.event.preventMap();
+      if (hasMapSdk() && typeof kakao.maps.event?.preventMap === 'function') kakao.maps.event.preventMap();
       const currentStation = state.allStations.find((item) => item.stationId === station.stationId) || station;
       selectStation(currentStation, { focusMap: false, openInfo: true, marker });
     });
@@ -922,11 +989,11 @@ function mapMetricMaximumForStage(stations, stage) {
 }
 
 function renderMapLayers() {
-  if (!state.map || !state.clusterer) return;
+  if (!hasMapSdk() || !state.map || !state.clusterer) return;
   const stage = mapStage();
   const stations = currentMapStations();
   state.mapMetricMaximum = mapMetricMaximumForStage(stations, stage);
-  const selectedStation = state.allStations.find((station) => station.stationId === state.selectedStationId);
+  const selectedStation = stations.find((station) => station.stationId === state.selectedStationId);
   removeDistrictOverlays();
   state.clusterer.clear();
 
@@ -943,7 +1010,8 @@ function renderMapLayers() {
 
   if (stage === 'district') {
     const displayDistricts = [...stationGroups(stations).keys()];
-    const allGroups = stationGroups(state.allStations);
+    const allGroups = stationGroups(state.allStations.filter((station) =>
+      Number.isFinite(station.lat) && Number.isFinite(station.lon)));
     const groups = displayDistricts.map((district) => [district, allGroups.get(district) || []]);
     const districtMetrics = groups.map(([district, group]) => ({
       district,
@@ -1005,6 +1073,7 @@ function refreshPointVisibility() {
 }
 
 function focusDistrict(district) {
+  if (!hasMapSdk() || !state.map) return;
   const stations = state.allStations.filter((station) => station.gu === district
     && station.lat >= SEOUL_COORDINATE_BOUNDS.minLat
     && station.lat <= SEOUL_COORDINATE_BOUNDS.maxLat
@@ -1139,11 +1208,14 @@ function buildCsv(rows) {
 }
 
 function exportCsv() {
-  const blob = new Blob([buildCsv(sortedCsvRows())], { type: 'text/csv;charset=utf-8' });
+  const rows = sortedCsvRows();
+  if (!state.hasLoadedData || rows.length === 0) return;
+  const blob = new Blob([buildCsv(rows)], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `bikebike-flow-${new Date().toISOString().slice(0, 10)}.csv`;
+  const demoSuffix = config.demoForecasts ? 'demo-' : '';
+  link.download = `bikebike-flow-${demoSuffix}${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -1154,13 +1226,13 @@ function setupResizeHandle() {
     if (!state.isDragging) return;
     const width = Math.min(window.innerWidth * 0.55, Math.max(390, window.innerWidth - event.clientX));
     elements.dashboardLayout.style.setProperty('--panel-width', `${width}px`);
-    state.map?.relayout();
+    if (state.map && hasMapSdk()) state.map.relayout();
   };
   const stop = () => {
     if (!state.isDragging) return;
     state.isDragging = false;
     document.body.classList.remove('resizing');
-    state.map?.relayout();
+    if (state.map && hasMapSdk()) state.map.relayout();
   };
   handle.addEventListener('pointerdown', (event) => {
     state.isDragging = true;
@@ -1177,7 +1249,7 @@ function setupResizeHandle() {
     const adjustment = event.key === 'ArrowLeft' ? 24 : -24;
     const width = Math.min(window.innerWidth * 0.55, Math.max(390, current + adjustment));
     elements.dashboardLayout.style.setProperty('--panel-width', `${width}px`);
-    state.map?.relayout();
+    if (state.map && hasMapSdk()) state.map.relayout();
   });
 }
 
@@ -1188,24 +1260,38 @@ function showToast(message) {
   state.toastTimer = setTimeout(() => { elements.toast.hidden = true; }, 2600);
 }
 
-async function loadData() {
+async function loadData({ force = false } = {}) {
   if (state.isLoading) return;
-  if (Number.isFinite(state.nextFetchAt) && Date.now() / 1000 < state.nextFetchAt) return;
+  if (!force && Number.isFinite(state.nextFetchAt) && Date.now() / 1000 < state.nextFetchAt) return;
   state.isLoading = true;
   updateRefreshButton();
+  elements.retryLoad.disabled = true;
   elements.refreshButton.classList.add('loading');
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 10000);
   try {
-    const response = await fetch(config.apiEndpoint, { cache: 'no-store' });
+    const response = await fetch(config.apiEndpoint, { cache: 'no-store', signal: controller.signal });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || '대여소 데이터를 불러오지 못했습니다.');
     const dashboardData = toDashboardData(payload);
     state.allStations = dashboardData.stations;
     state.baseTime = dashboardData.baseTime;
     state.fetchedAt = dashboardData.fetchedAt;
-    state.nextFetchAt = dashboardData.nextFetchAt;
+    state.nextFetchAt = dashboardData.stale
+      ? Date.now() / 1000 + config.refreshIntervalMs / 1000
+      : dashboardData.nextFetchAt;
     state.source = dashboardData.source;
     state.stale = dashboardData.stale;
     state.staleReason = dashboardData.staleReason;
+    state.hasLoadedData = true;
+    state.initialLoadFailed = false;
+    state.refreshFailed = false;
+    elements.dataError.hidden = true;
+    elements.retryLoad.disabled = false;
     state.risk = 'all';
     if (state.horizon === 'now') state.horizon = 'h1';
     syncHorizonControls();
@@ -1221,72 +1307,98 @@ async function loadData() {
       const maxScrollTop = Math.max(0, tableScroll.scrollHeight - tableScroll.clientHeight);
       tableScroll.scrollTop = Math.min(previousScrollTop, maxScrollTop);
     }
-    if (state.map && state.allStations.length) {
+    const stationsWithCoordinates = state.allStations.filter((station) =>
+      Number.isFinite(station.lat) && Number.isFinite(station.lon));
+    if (state.map && hasMapSdk() && stationsWithCoordinates.length) {
       const bounds = new kakao.maps.LatLngBounds();
-      state.allStations.forEach((station) => bounds.extend(new kakao.maps.LatLng(station.lat, station.lon)));
+      stationsWithCoordinates.forEach((station) => bounds.extend(new kakao.maps.LatLng(station.lat, station.lon)));
       state.map.setBounds(bounds, 40, 40, 40, 40);
       document.getElementById('mapTitle').textContent = '서울 전체';
     }
-    elements.mapStatus.textContent = `${state.allStations.length.toLocaleString('ko-KR')}개 대여소 데이터`;
-    if (state.staleReason === 'error') showToast('갱신 실패');
-  } catch {
-    state.stale = true;
-    state.staleReason = 'error';
-    if (state.allStations.length) {
+    if (state.map) {
+      elements.mapStatus.textContent = `${stationsWithCoordinates.length.toLocaleString('ko-KR')}개 대여소 데이터`;
+    }
+
+  } catch (error) {
+    state.nextFetchAt = Date.now() / 1000 + config.refreshIntervalMs / 1000;
+    if (state.hasLoadedData) {
+      state.refreshFailed = true;
+      state.stale = true;
       updateDataAge();
     } else {
-      elements.dataMode.textContent = '연결 오류';
-      elements.dataMode.classList.add('demo');
-      elements.dataFreshness.textContent = '오래된 데이터';
-      elements.dataFreshness.className = 'freshness-chip old';
-      elements.dataFreshness.title = '서울시 원천 데이터는 최대 약 5분 늦게 반영될 수 있습니다. (조회 실패)';
-      elements.resultCount.textContent = '데이터를 불러오지 못했습니다';
-      elements.tableEmpty.textContent = '대여소 데이터를 불러오지 못했습니다.';
-      elements.tableEmpty.hidden = false;
-      elements.mapStatus.textContent = '데이터를 불러오지 못했습니다';
+      showInitialLoadFailure();
     }
-    showToast('갱신 실패');
+    if (timedOut || error instanceof Error && error.name === 'AbortError') {
+      elements.dataFreshness.title = '데이터 요청이 10초 안에 완료되지 않았습니다.';
+    }
   } finally {
+    window.clearTimeout(timeoutId);
     state.isLoading = false;
     elements.refreshButton.classList.remove('loading');
+    elements.retryLoad.disabled = false;
     updateRefreshButton();
   }
 }
 
 function setupMap() {
-  state.map = new kakao.maps.Map(document.getElementById('map'), {
-    center: new kakao.maps.LatLng(37.5665, 126.9780),
-    level: 9
-  });
-  state.clusterer = new kakao.maps.MarkerClusterer({
-    map: state.map,
-    averageCenter: true,
-    minLevel: config.map.clusterLevel,
-    gridSize: 55,
-    styles: [{
-      width: '40px', height: '40px', borderRadius: '50%',
-      background: '#43594d', color: '#fff', textAlign: 'center', lineHeight: '40px',
-      fontFamily: 'DM Mono, monospace', fontSize: '11px', border: '2px solid #fff', boxShadow: '0 2px 8px #15221b4d'
-    }]
-  });
-  state.infoOverlay = new kakao.maps.CustomOverlay({
-    position: state.map.getCenter(),
-    content: document.createElement('div'),
-    xAnchor: 0.5,
-    yAnchor: 1,
-    zIndex: 11,
-    clickable: true
-  });
-  kakao.maps.event.addListener(state.map, 'click', handleEmptyMapClick);
-  kakao.maps.event.addListener(state.map, 'zoom_changed', renderMapLayers);
-  kakao.maps.event.addListener(state.map, 'idle', refreshPointVisibility);
-  window.addEventListener('resize', () => state.map.relayout());
+  if (!hasMapSdk() || !window.kakao.maps.Map || !window.kakao.maps.MarkerClusterer
+      || !window.kakao.maps.CustomOverlay || !window.kakao.maps.event
+      || typeof window.kakao.maps.event.addListener !== 'function') {
+    showMapUnavailable();
+    return false;
+  }
+  try {
+    state.map = new window.kakao.maps.Map(document.getElementById('map'), {
+      center: new window.kakao.maps.LatLng(37.5665, 126.9780),
+      level: 9
+    });
+    state.clusterer = new window.kakao.maps.MarkerClusterer({
+      map: state.map,
+      averageCenter: true,
+      minLevel: config.map.clusterLevel,
+      gridSize: 55,
+      styles: [{
+        width: '40px', height: '40px', borderRadius: '50%',
+        background: '#43594d', color: '#fff', textAlign: 'center', lineHeight: '40px',
+        fontFamily: 'DM Mono, monospace', fontSize: '11px', border: '2px solid #fff', boxShadow: '0 2px 8px #15221b4d'
+      }]
+    });
+    state.infoOverlay = new window.kakao.maps.CustomOverlay({
+      position: state.map.getCenter(),
+      content: document.createElement('div'),
+      xAnchor: 0.5,
+      yAnchor: 1,
+      zIndex: 11,
+      clickable: true
+    });
+    window.kakao.maps.event.addListener(state.map, 'click', handleEmptyMapClick);
+    window.kakao.maps.event.addListener(state.map, 'zoom_changed', renderMapLayers);
+    window.kakao.maps.event.addListener(state.map, 'idle', refreshPointVisibility);
+    window.addEventListener('resize', () => {
+      if (state.map && hasMapSdk()) state.map.relayout();
+    });
+    return true;
+  } catch {
+    state.map = null;
+    state.clusterer = null;
+    state.infoOverlay = null;
+    showMapUnavailable();
+    return false;
+  }
+}
+
+function showMapUnavailable() {
+  document.querySelector('.map-panel').classList.add('map-unavailable');
+  document.getElementById('map').replaceChildren();
+  elements.mapStatus.textContent = '지도를 불러오지 못했습니다';
 }
 
 function bindControls() {
   syncHorizonControls();
   syncMetricControls();
-  elements.refreshButton.addEventListener('click', loadData);
+  elements.demoDataNote.hidden = !config.demoForecasts;
+  elements.refreshButton.addEventListener('click', () => loadData({ force: true }));
+  elements.retryLoad.addEventListener('click', () => loadData({ force: true }));
   elements.exportCsv.addEventListener('click', exportCsv);
   elements.districtFilter.addEventListener('change', () => {
     state.district = elements.districtFilter.value;
@@ -1330,7 +1442,10 @@ function bindControls() {
   elements.previousPage.addEventListener('click', () => { state.page -= 1; renderRows(); });
   elements.nextPage.addEventListener('click', () => { state.page += 1; renderRows(); });
 
-  elements.search.addEventListener('input', () => showSuggestions(elements.search.value));
+  elements.search.addEventListener('input', () => {
+    showSuggestions(elements.search.value);
+    renderDashboard();
+  });
   elements.search.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowDown' && !elements.suggestions.hidden) {
       event.preventDefault();
@@ -1356,6 +1471,8 @@ function bindControls() {
 }
 
 function boot() {
+  if (state.booted) return;
+  state.booted = true;
   bindControls();
   setupMap();
   loadData();
@@ -1372,9 +1489,12 @@ function boot() {
   });
 }
 
-if (window.kakao && window.kakao.maps) {
-  kakao.maps.load(boot);
+if (!window.kakaoSdkFailed && window.kakao && window.kakao.maps && typeof window.kakao.maps.load === 'function') {
+  try {
+    window.kakao.maps.load(boot);
+  } catch (error) {
+    boot();
+  }
 } else {
-  elements.mapStatus.textContent = '카카오 개발자 콘솔에서 현재 도메인의 JavaScript 허용 설정을 확인해 주세요.';
-  elements.dataMode.textContent = '지도 연결 오류';
+  boot();
 }
