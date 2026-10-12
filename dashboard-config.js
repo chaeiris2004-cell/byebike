@@ -16,8 +16,14 @@ window.OPERATOR_CONFIG = Object.freeze({
     markerMediumRatio: 0.67,
     markerSmallSizeOffset: -4,
     markerLargeSizeOffset: 4,
-    districtBubbleMinDiameter: 48,
-    districtBubbleMaxDiameter: 96
+    districtBubbleMinDiameter: 64,
+    districtBubbleMaxDiameter: 128,
+    bubbleScaleByLevel: Object.freeze({
+      7: 1.6,
+      8: 1.3,
+      9: 1.0,
+      10: 0.85
+    })
   }),
   kakaoJavaScriptKey: 'db90fddc5d2042d05f04f1e1bfdd94c7'
 });

@@ -809,17 +809,13 @@ function makeDistrictBubble(district, stations, metrics, diameter, intensity) {
   const content = document.createElement('button');
   content.type = 'button';
   content.className = `district-bubble ${metrics.color}`;
-  content.style.setProperty('--bubble-color', metrics.color === 'shortage'
-    ? 'var(--shortage)'
-    : metrics.color === 'surplus' ? 'var(--surplus)'
-      : metrics.color === 'volume' ? 'var(--ink)' : 'var(--normal)');
   content.style.setProperty('--intensity', `${intensity * 100}%`);
   content.style.width = `${diameter}px`;
   content.style.height = `${diameter}px`;
   content.style.minWidth = `${diameter}px`;
   content.style.minHeight = `${diameter}px`;
   content.style.color = 'var(--ink)';
-  content.style.whiteSpace = 'normal';
+  content.style.whiteSpace = 'nowrap';
   content.append(textNode('strong', district));
   const subline = `${metrics.amount.toLocaleString('ko-KR')} (대)`;
   content.append(textNode('span', subline));
@@ -997,17 +993,31 @@ function renderMapLayers() {
       state.districtLegend.className = `district-legend ${state.risk}`;
       state.districtLegendMaximum.textContent = `최대 ${Math.round(maxRatio * 100)}%`;
     }
-    for (const { district, group, metrics } of districtMetrics) {
-      const diameter = maxAmount > 0
+    const bubbleScaleByLevel = config.map.bubbleScaleByLevel;
+    const bubbleScaleLevels = Object.keys(bubbleScaleByLevel).map(Number).sort((a, b) => a - b);
+    const minBubbleScaleLevel = bubbleScaleLevels[0];
+    const maxBubbleScaleLevel = bubbleScaleLevels[bubbleScaleLevels.length - 1];
+    const zoomLevel = state.map.getLevel();
+    const bubbleScale = zoomLevel < minBubbleScaleLevel
+      ? bubbleScaleByLevel[minBubbleScaleLevel]
+      : zoomLevel > maxBubbleScaleLevel
+        ? bubbleScaleByLevel[maxBubbleScaleLevel]
+        : bubbleScaleByLevel[zoomLevel] || 1;
+    const bubbles = districtMetrics.map(({ district, group, metrics }) => {
+      const baseDiameter = maxAmount > 0
         ? Math.max(config.map.districtBubbleMinDiameter,
           Math.min(config.map.districtBubbleMaxDiameter,
             Math.sqrt(metrics.amount / maxAmount) * config.map.districtBubbleMaxDiameter))
         : config.map.districtBubbleMinDiameter;
+      const diameter = baseDiameter * bubbleScale;
       const intensity = state.metric === 'volume'
-        ? 0.55
-        : metrics.decreaseCount === metrics.increaseCount || maxDominantRatio === 0
-          ? 0.25
-          : Math.max(0.25, metrics.dominantRatio / maxDominantRatio);
+        ? 0.3
+        : metrics.decreaseCount === metrics.increaseCount
+          ? 0.3
+          : 0.15 + 0.55 * metrics.dominantRatio;
+      return { district, group, metrics, diameter, intensity };
+    }).sort((left, right) => right.diameter - left.diameter);
+    for (const { district, group, metrics, diameter, intensity } of bubbles) {
       state.districtOverlays.push(makeDistrictBubble(district, group, metrics, diameter, intensity));
     }
     showSelectedStation();
