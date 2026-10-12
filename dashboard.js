@@ -88,6 +88,14 @@ function flowValue(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function seededUnit(seed, intervalIndex, salt) {
+  let value = (seed ^ Math.imul(intervalIndex + 1, 0x9e3779b1) ^ Math.imul(salt, 0x85ebca6b)) >>> 0;
+  value = Math.imul(value ^ (value >>> 16), 0x85ebca6b);
+  value = Math.imul(value ^ (value >>> 13), 0xc2b2ae35);
+  value = (value ^ (value >>> 16)) >>> 0;
+  return value / 0x100000000;
+}
+
 function makeDemoFlow(stationId, rackTotCnt, stockNow) {
   const seed = stableSeed(stationId);
   const rackScale = Math.max(0, rackTotCnt);
@@ -95,11 +103,11 @@ function makeDemoFlow(stationId, rackTotCnt, stockNow) {
   const volume = {};
   const intervals = ['h1', 'h2', 'h3'];
   intervals.forEach((key, index) => {
-    const intervalSeed = (seed + Math.imul(index + 1, 0x9e3779b1) + Math.round(stockNow || 0)) >>> 0;
-    const sizeRatio = 0.1 + (intervalSeed % 501) / 1000;
-    const variation = 0.8 + ((intervalSeed >>> 9) % 401) / 1000;
+    const intervalSeed = (seed + Math.round(stockNow || 0)) >>> 0;
+    const sizeRatio = 0.1 + seededUnit(intervalSeed, index, 1) * 0.5;
+    const variation = 0.8 + seededUnit(intervalSeed, index, 2) * 0.4;
     const intervalVolume = Math.round(rackScale * sizeRatio * variation);
-    const rentalShare = 0.2 + ((intervalSeed >>> 18) % 601) / 1000;
+    const rentalShare = 0.2 + seededUnit(intervalSeed, index, 3) * 0.6;
     const rentals = Math.round(intervalVolume * rentalShare);
     volume[key] = intervalVolume;
     flow[key] = intervalVolume - 2 * rentals;
