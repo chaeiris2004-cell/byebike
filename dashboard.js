@@ -250,17 +250,41 @@ function sortBy(key) {
     state.sortKey = key;
     state.sortDir = key === 'stationName' ? 'asc' : 'desc';
   }
-  state.page = 1;
-  renderRows();
+  renderListForCriteriaChange(() => renderRows());
+}
+
+function renderListForCriteriaChange(render = renderDashboard) {
+  const selectedId = state.selectedStationId;
+  const rows = sortedRows();
+  const selectedIndex = selectedId
+    ? rows.findIndex((station) => station.stationId === selectedId)
+    : -1;
+
+  if (selectedIndex >= 0) {
+    state.page = Math.floor(selectedIndex / config.pageSize) + 1;
+  } else {
+    if (selectedId) clearSelection();
+    state.page = 1;
+  }
+
+  render();
+  requestAnimationFrame(() => {
+    const container = document.getElementById('tableScroll');
+    if (!container) return;
+    if (selectedIndex >= 0 && state.selectedStationId === selectedId) {
+      centerSelectedRow(selectedId, 'map');
+    } else {
+      container.scrollTop = 0;
+    }
+  });
 }
 
 function setSelectedRisk(risk) {
   state.risk = risk;
-  state.page = 1;
   document.querySelectorAll('[data-risk]').forEach((button) => {
     button.classList.toggle('active', button.dataset.risk === risk);
   });
-  renderDashboard();
+  renderListForCriteriaChange();
 }
 
 function updateDataStatus() {
@@ -540,9 +564,8 @@ function clearSelection() {
 function clearDistrictFilter() {
   state.district = '';
   elements.districtFilter.value = '';
-  state.page = 1;
   elements.mapTitle.textContent = '서울 전체';
-  renderDashboard();
+  renderListForCriteriaChange();
 }
 
 function handleEmptyMapClick() {
@@ -553,11 +576,11 @@ function handleEmptyMapClick() {
   if (mapStage() === 'district' && state.district) clearDistrictFilter();
 }
 
-function renderRows() {
+function renderRows({ preservePage = false } = {}) {
   updateSortHeaders();
   const rows = sortedRows();
   const totalPages = Math.max(1, Math.ceil(rows.length / config.pageSize));
-  state.page = Math.min(state.page, totalPages);
+  if (!preservePage) state.page = Math.min(state.page, totalPages);
   const start = (state.page - 1) * config.pageSize;
   const pageRows = rows.slice(start, start + config.pageSize);
   const fragment = document.createDocumentFragment();
@@ -596,9 +619,9 @@ function renderRows() {
   elements.nextPage.disabled = state.page >= totalPages;
 }
 
-function renderDashboard() {
+function renderDashboard(options = {}) {
   updateFilterSummary();
-  renderRows();
+  renderRows(options);
   updateActiveFilter();
   if (state.map) renderMapLayers();
 }
@@ -679,8 +702,7 @@ function makeDistrictBubble(district, stations, intensity) {
     kakao.maps.event.preventMap();
     state.district = district;
     elements.districtFilter.value = district;
-    state.page = 1;
-    renderDashboard();
+    renderListForCriteriaChange();
     focusDistrict(district);
   });
   const center = stations.length
@@ -944,11 +966,9 @@ function chooseSuggestion(index) {
   if (!item) return;
   closeSuggestions();
   if (item.kind === 'district') {
-    clearSelection();
     state.district = item.gu;
     elements.districtFilter.value = item.gu;
-    state.page = 1;
-    renderDashboard();
+    renderListForCriteriaChange();
     focusDistrict(item.gu);
     return;
   }
@@ -1050,7 +1070,13 @@ async function loadData() {
     fillDistrictSelect();
     elements.districtFilter.value = state.district;
     updateDataStatus();
-    renderDashboard();
+    const tableScroll = document.getElementById('tableScroll');
+    const previousScrollTop = tableScroll?.scrollTop ?? 0;
+    renderDashboard({ preservePage: true });
+    if (tableScroll) {
+      const maxScrollTop = Math.max(0, tableScroll.scrollHeight - tableScroll.clientHeight);
+      tableScroll.scrollTop = Math.min(previousScrollTop, maxScrollTop);
+    }
     if (state.map && state.allStations.length) {
       const bounds = new kakao.maps.LatLngBounds();
       state.allStations.forEach((station) => bounds.extend(new kakao.maps.LatLng(station.lat, station.lon)));
@@ -1129,11 +1155,7 @@ function bindControls() {
   elements.exportCsv.addEventListener('click', exportCsv);
   elements.districtFilter.addEventListener('change', () => {
     state.district = elements.districtFilter.value;
-    state.page = 1;
-    if (state.selectedStationId && !filteredStations().some((station) => station.stationId === state.selectedStationId)) {
-      clearSelection();
-    }
-    renderDashboard();
+    renderListForCriteriaChange();
     if (state.district) focusDistrict(state.district);
   });
   elements.clearDistrict.addEventListener('click', () => {
@@ -1142,12 +1164,8 @@ function bindControls() {
   document.querySelectorAll('[data-risk]').forEach((button) => {
     button.addEventListener('click', () => {
       state.risk = button.dataset.risk;
-      state.page = 1;
       document.querySelectorAll('[data-risk]').forEach((item) => item.classList.toggle('active', item === button));
-      if (state.selectedStationId && !filteredStations().some((station) => station.stationId === state.selectedStationId)) {
-        clearSelection();
-      }
-      renderDashboard();
+      renderListForCriteriaChange();
     });
   });
   document.querySelectorAll('[data-horizon]').forEach((button) => {
